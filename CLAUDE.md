@@ -145,3 +145,10 @@ npm run dev                                       # terminal 2 - frontend, :5173
 - **`apps.json` is read once at startup, not live-reloaded.** Adding or
   editing an app needs a restart. There's no database and no admin UI for
   it yet — deliberately the simplest possible MVP.
+- **Deployed `IDENTITY_SYSTEM_DB` must resolve inside `__BACKEND_DIR__/data/`.**
+  `deploy.sh`'s rsync `--delete` only spares `data/`, `.env`, and `*.db`/
+  `*.db-*` (belt and suspenders) - `.env.example`'s own local-dev default
+  (`./auth.db`, relative to `WorkingDirectory=__BACKEND_DIR__`) resolves
+  *outside* `data/` if it's ever deployed unedited, and gets deleted the
+  next deploy. `remote-setup.sh` checks this and warns loudly; don't remove
+  that check.

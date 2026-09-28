@@ -68,6 +68,20 @@ chown -R "${SERVICE_USER}:${SERVICE_USER}" "${BACKEND_DIR}/.venv"
 if [[ ! -f "${BACKEND_DIR}/.env" ]]; then
     echo "WARNING: ${BACKEND_DIR}/.env is missing - copy .env.example there" >&2
     echo "and fill it in, then re-run this script (or just restart ${SERVICE_NAME})." >&2
+else
+    # IDENTITY_SYSTEM_DB has to resolve inside data/ - that's the only place
+    # (besides .env itself) deploy.sh's rsync --delete doesn't wipe on the
+    # next deploy. .env.example's own local-dev default (./auth.db) is
+    # exactly the wrong value here if it ever gets deployed unedited - warn
+    # loudly rather than silently losing the account database next deploy.
+    db_path="$(grep -E '^IDENTITY_SYSTEM_DB=' "${BACKEND_DIR}/.env" | tail -1 | cut -d= -f2-)"
+    if [[ -n "${db_path}" && "${db_path}" != "${BACKEND_DIR}/data/"* ]]; then
+        echo "WARNING: IDENTITY_SYSTEM_DB in ${BACKEND_DIR}/.env is '${db_path}'," >&2
+        echo "not inside ${BACKEND_DIR}/data/ - deploy.sh's rsync --delete will" >&2
+        echo "wipe it on the next deploy (only data/, .env, *.db and *.db-* are" >&2
+        echo "excluded from that sweep). Move the db file into ${BACKEND_DIR}/data/," >&2
+        echo "point IDENTITY_SYSTEM_DB at it there, and restart ${SERVICE_NAME}." >&2
+    fi
 fi
 
 echo "Installing systemd unit..."
