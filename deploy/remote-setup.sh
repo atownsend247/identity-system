@@ -31,7 +31,7 @@ fi
 
 BACKEND_DIR="${BACKEND_DIR:-/opt/identity-system}"
 SERVICE_NAME="${SERVICE_NAME:-identity-system-api}"
-SERVICE_USER="identity-system"
+SERVICE_USER="root"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQUIRED_PACKAGES=(python3-venv python3-pip nginx curl rsync)
