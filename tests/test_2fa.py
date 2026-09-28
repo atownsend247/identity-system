@@ -5,7 +5,7 @@ import pyotp
 
 def _login(client, auth, email="alex@example.com", password="password123"):
     auth.create_user(email, password, name="Alex")
-    client.post("/login", data={"email": email, "password": password})
+    client.post("/api/login", json={"email": email, "password": password})
 
 
 def test_setup_confirm_then_login_requires_otp(client, auth):
@@ -24,24 +24,22 @@ def test_setup_confirm_then_login_requires_otp(client, auth):
     client.post("/logout")
     # now a bare password isn't enough
     resp = client.post(
-        "/login",
-        data={"email": "alex@example.com", "password": "password123"},
-        follow_redirects=False,
+        "/api/login",
+        json={"email": "alex@example.com", "password": "password123"},
     )
     assert resp.status_code == 401
-    assert "6-digit code" in resp.text
+    assert "6-digit code" in resp.json()["detail"]
 
     # a fresh code works
     good = client.post(
-        "/login",
-        data={
+        "/api/login",
+        json={
             "email": "alex@example.com",
             "password": "password123",
             "otp": pyotp.TOTP(secret).now(),
         },
-        follow_redirects=False,
     )
-    assert good.status_code == 303
+    assert good.status_code == 200
 
 
 def test_confirm_with_bad_code_is_422_json(client, auth):

@@ -14,7 +14,7 @@ def test_verify_with_garbage_cookie_is_401(client):
 
 def test_verify_with_valid_session_returns_identity_headers(client, auth):
     user = auth.create_user("alex@example.com", "password123", name="Alex")
-    client.post("/login", data={"email": "alex@example.com", "password": "password123"})
+    client.post("/api/login", json={"email": "alex@example.com", "password": "password123"})
 
     resp = client.get("/verify")
     assert resp.status_code == 200
@@ -25,7 +25,7 @@ def test_verify_with_valid_session_returns_identity_headers(client, auth):
 
 def test_me_mirrors_verify_as_json(client, auth):
     auth.create_user("alex@example.com", "password123", name="Alex")
-    client.post("/login", data={"email": "alex@example.com", "password": "password123"})
+    client.post("/api/login", json={"email": "alex@example.com", "password": "password123"})
 
     resp = client.get("/me")
     assert resp.status_code == 200

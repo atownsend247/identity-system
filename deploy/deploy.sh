@@ -15,6 +15,15 @@
 # target's own SQLite file lives (see remote-setup.sh) - so a real .env and
 # an already-provisioned auth.db both survive every future deploy.
 #
+# frontend/dist/ (built by the Jenkinsfile's Frontend stage before this
+# script runs) is NOT excluded - it ships as part of the normal whole-repo
+# sync, same as finance-system, so nginx's `root __BACKEND_DIR__/frontend/dist`
+# (see nginx-identity-system.conf) finds it with no separate FRONTEND_DIR
+# or extra rsync step needed. frontend/node_modules IS excluded, same
+# reasoning as .venv below - it's huge and gets rebuilt from
+# frontend/package-lock.json if anyone ever needs it on the container
+# itself (normally nobody does; only the built dist/ ships).
+#
 # Usage: ./deploy.sh   (from the repo root)
 
 set -euo pipefail
@@ -43,6 +52,7 @@ rsync -az --delete \
     --exclude 'reports/' \
     --exclude 'data/' \
     --exclude '.env' \
+    --exclude 'frontend/node_modules/' \
     "${REPO_ROOT}/" "${SSH_TARGET}:${BACKEND_DIR}/"
 
 echo "Running remote setup on ${DEPLOY_HOST}..."

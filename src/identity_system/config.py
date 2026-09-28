@@ -22,6 +22,7 @@ class Settings:
     session_days: int
     issuer: str
     admin_emails: frozenset[str]
+    apps_path: str
 
     cookie_name: str = "identity_session"
 
@@ -38,6 +39,7 @@ class Settings:
                 for email in _env("ADMIN_EMAILS", "").split(",")
                 if email.strip()
             ),
+            apps_path=_env("APPS_PATH", "./apps.json"),
         )
 
     def is_admin(self, email: str) -> bool:

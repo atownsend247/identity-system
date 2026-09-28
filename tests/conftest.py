@@ -27,6 +27,7 @@ def settings() -> Settings:
         session_days=30,
         issuer="identity-system-test",
         admin_emails=frozenset({"admin@example.com"}),
+        apps_path="/nonexistent/apps.json",  # tests pass `apps` to create_app directly
     )
 
 
@@ -36,8 +37,13 @@ def auth(store, settings) -> AuthService:
 
 
 @pytest.fixture
-def client(auth, settings) -> TestClient:
-    app = create_app(auth, settings)
+def apps() -> list[dict]:
+    return [{"name": "Example App", "url": "https://app.example.com", "description": "Test app."}]
+
+
+@pytest.fixture
+def client(auth, settings, apps) -> TestClient:
+    app = create_app(auth, settings, apps)
     # The session cookie is scoped to settings.cookie_domain (.example.com);
     # TestClient's default host ("testserver") doesn't match that domain, so
     # its cookie jar would silently drop the cookie between requests unless

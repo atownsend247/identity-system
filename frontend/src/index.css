@@ -1,0 +1,87 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+.app-header {
+  border-bottom: 1px solid #ddd;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.app-main {
+  max-width: 48rem;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+}
+
+.btn {
+  padding: 0.5rem 0.9rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.error {
+  color: #b00020;
+}
+
+.apps-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  margin-top: 1.5rem;
+}
+
+.app-card {
+  display: block;
+  border: 1px solid #ddd;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  text-decoration: none;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #ddd;
+}
+
+th {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: #666;
+}
+
+form {
+  max-width: 22rem;
+}
+
+label {
+  display: block;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
+input {
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 1rem;
+  box-sizing: border-box;
+}

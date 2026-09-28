@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Finance",
+    "url": "https://finance.atathome.me",
+    "description": "Accounts, transactions, and budgeting."
+  },
+  {
+    "name": "Invoices",
+    "url": "https://invoices.atathome.me",
+    "description": "Quotes, invoices, and PDF export."
+  }
+]

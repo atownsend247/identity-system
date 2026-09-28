@@ -1,15 +1,22 @@
-"""The identity-system FastAPI app: a login page plus the JSON endpoints a
-reverse proxy's forward-auth hook and downstream apps call.
+"""The identity-system FastAPI app: the JSON API a reverse proxy's
+forward-auth hook, downstream apps, and this service's own Vite/React
+frontend (``frontend/``) all call. There's no server-rendered HTML here -
+``/login``, ``/admin``, ``/`` (apps directory) and ``/account`` are pure
+client-side routes; nginx serves the built frontend for those in
+production (see ``deploy/nginx-identity-system.conf``) and Vite's dev
+server proxies everything below to this app locally (see
+``frontend/vite.config.ts``).
 
-``create_app(auth, settings)`` takes an already-constructed ``AuthService``
-(same shape as sessionkit's own ``examples/fastapi_app.py``), so tests can
-build one over an in-memory store with no real files touched.
+``create_app(auth, settings, apps)`` takes an already-constructed
+``AuthService`` (same shape as sessionkit's own ``examples/fastapi_app.py``)
+and the static apps-directory list, so tests can build one over an
+in-memory store with no real files touched.
 """
 
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Form, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from sessionkit import (
     AuthenticationError,
@@ -23,15 +30,15 @@ from sessionkit import (
 )
 
 from .config import Settings
-from .templates import render_admin_users, render_login
 
 # Same shape as sessionkit's own examples/fastapi_app.py: one map from
 # AuthError subclass to status code, checked with isinstance (first match
-# wins), covering every JSON endpoint. /login is the one route that handles
-# its errors itself (it needs to re-render the HTML form, not return JSON).
+# wins). Every route below is a JSON route, so this covers all of them -
+# unlike when /login rendered its own HTML form, there's no exception left.
 # OtpInvalid needs its own entry - unlike OtpRequired/OtpLocked it does NOT
 # subclass AuthenticationError (see sessionkit's errors.py), so without this
-# a bad 2FA code at /2fa/confirm would fall through to a bare 500.
+# a bad 2FA code at /2fa/confirm (or a bad code at /api/login) would fall
+# through to a bare 500.
 _ERROR_STATUS: dict[type[AuthError], int] = {
     AuthenticationError: 401,
     OtpInvalid: 422,
@@ -41,8 +48,9 @@ _ERROR_STATUS: dict[type[AuthError], int] = {
 }
 
 
-def create_app(auth: AuthService, settings: Settings) -> FastAPI:
+def create_app(auth: AuthService, settings: Settings, apps: list[dict] | None = None) -> FastAPI:
     app = FastAPI(title="identity-system")
+    apps = apps or []
 
     async def _handle_auth_error(_request: Request, exc: AuthError) -> JSONResponse:
         status = next((s for t, s in _ERROR_STATUS.items() if isinstance(exc, t)), 400)
@@ -75,37 +83,43 @@ def create_app(auth: AuthService, settings: Settings) -> FastAPI:
             settings.cookie_name, path="/", domain=settings.cookie_domain or None
         )
 
+    def _user_json(user: User) -> dict:
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "totp_enabled": user.totp_enabled,
+        }
+
     # ------------------------------------------------------------- login
 
-    @app.get("/login", response_class=HTMLResponse)
-    def login_form(rd: str = "") -> str:
-        return render_login(rd=rd)
-
-    @app.post("/login")
-    def login_submit(
-        email: str = Form(""),
-        password: str = Form(""),
-        otp: str = Form(""),
-        rd: str = Form(""),
-    ):
-        try:
-            result = auth.login(email, password, otp=otp or None)
-        except AuthError as exc:
-            # covers AuthenticationError (bad creds), OtpRequired, OtpLocked
-            # and OtpInvalid - login() raises OtpInvalid as an authentication
-            # failure, per docs/architecture.md#errors, so it belongs here
-            # too rather than being re-shown as a form-validation error.
-            return HTMLResponse(
-                render_login(rd=rd, email=email, error=str(exc)), status_code=401
-            )
-        target = rd if settings.is_trusted_redirect(rd) else "/me"
-        response = RedirectResponse(url=target, status_code=303)
+    @app.post("/api/login")
+    def api_login(payload: dict):
+        result = auth.login(
+            payload.get("email", ""),
+            payload.get("password", ""),
+            otp=payload.get("otp") or None,
+        )
+        # Computed server-side, same as the old HTML form's redirect target -
+        # the frontend must navigate to this value, never the raw ?rd= it
+        # was given, or is_trusted_redirect's open-redirect guard would be
+        # for nothing (see CLAUDE.md).
+        target = (
+            payload.get("rd", "")
+            if settings.is_trusted_redirect(payload.get("rd", ""))
+            else "/account"
+        )
+        response = JSONResponse(
+            {"user": _user_json(result.user), "redirect_to": target}
+        )
         _set_session_cookie(response, result.token)
         return response
 
     @app.post("/logout")
     def logout(request: Request):
         auth.logout(_token(request))
+        # nginx serves the SPA shell for this path now, not a server-rendered
+        # form - the redirect target doesn't change.
         response = RedirectResponse(url="/login", status_code=303)
         _clear_session_cookie(response)
         return response
@@ -129,12 +143,7 @@ def create_app(auth: AuthService, settings: Settings) -> FastAPI:
 
     @app.get("/me")
     def me(user: User = Depends(current_user)):
-        return {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "totp_enabled": user.totp_enabled,
-        }
+        return _user_json(user)
 
     # ----------------------------------------------------------- profile
 
@@ -180,19 +189,36 @@ def create_app(auth: AuthService, settings: Settings) -> FastAPI:
 
     # --------------------------------------------------------------- admin
 
-    @app.get("/admin", response_class=HTMLResponse)
-    def admin_users(request: Request):
-        # Handles its own auth like /login does, rather than Depends(current_user)
-        # + _ERROR_STATUS - this is a page a human browses directly, so a
-        # missing/expired session should redirect to sign in, not return a
-        # bare 401 JSON body.
-        try:
-            user = current_user(request)
-        except AuthenticationError:
-            return RedirectResponse(url="/login?rd=/admin", status_code=303)
+    @app.get("/api/admin/users")
+    def admin_users(user: User = Depends(current_user)):
+        # Depends(current_user) alone gives the standard 401 via
+        # _ERROR_STATUS; is_admin has no sessionkit exception type of its
+        # own (it isn't an AuthError - it's this service's own bespoke
+        # allowlist check), so it's a plain HTTPException instead. Unlike
+        # the old HTML page, this route doesn't redirect on 401/403 - the
+        # frontend's Admin page owns that (see frontend/src/Admin.tsx).
         if not settings.is_admin(user.email):
-            return HTMLResponse("Forbidden", status_code=403)
-        return render_admin_users(auth.list_users())
+            raise HTTPException(status_code=403, detail="forbidden")
+        return [
+            {
+                "id": u.id,
+                "email": u.email,
+                "name": u.name,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+                "totp_enabled": u.totp_enabled,
+            }
+            for u in auth.list_users()
+        ]
+
+    # ---------------------------------------------------------------- apps
+
+    @app.get("/api/apps")
+    def list_apps():
+        # Public, deliberately unauthenticated - the apps directory (this
+        # service's own default landing page) is meant to be visible
+        # whether or not the visitor is signed in. See apps.py/apps.json.
+        return apps
 
     return app
 

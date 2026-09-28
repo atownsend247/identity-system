@@ -3,7 +3,7 @@ from __future__ import annotations
 
 def _login(client, auth, email="alex@example.com", password="password123"):
     auth.create_user(email, password, name="Alex")
-    client.post("/login", data={"email": email, "password": password})
+    client.post("/api/login", json={"email": email, "password": password})
 
 
 def test_update_name(client, auth):
@@ -48,8 +48,7 @@ def test_change_password_then_old_session_is_revoked(client, auth):
     assert client.get("/me").status_code == 401
 
     relogin = client.post(
-        "/login",
-        data={"email": "alex@example.com", "password": "brand-new-secret"},
-        follow_redirects=False,
+        "/api/login",
+        json={"email": "alex@example.com", "password": "brand-new-secret"},
     )
-    assert relogin.status_code == 303
+    assert relogin.status_code == 200
