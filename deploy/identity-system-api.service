@@ -1,0 +1,32 @@
+# Systemd unit for the identity-system API, inside the Proxmox LXC
+# container. Installed (and refreshed) by deploy/remote-setup.sh.
+#
+# __BACKEND_DIR__ is substituted by remote-setup.sh at install time (from
+# the BACKEND_DIR env var) - don't install this file verbatim.
+#
+# Runs as a dedicated `identity-system` system user (created by
+# remote-setup.sh), not root - this process only ever needs to read/write
+# its own SQLite file under __BACKEND_DIR__/data, nothing else on the box.
+#
+# EnvironmentFile is __BACKEND_DIR__/.env. .env is gitignored and excluded
+# from deploy.sh's rsync, so it's never in the synced checkout - copy
+# .env.example to __BACKEND_DIR__/.env by hand and fill it in (in
+# particular, point IDENTITY_SYSTEM_DB at __BACKEND_DIR__/data/auth.db, the
+# directory remote-setup.sh creates and owns for this user) before the
+# first deploy. It then survives every later one untouched.
+[Unit]
+Description=identity-system API
+After=network.target
+
+[Service]
+Type=simple
+User=identity-system
+Group=identity-system
+WorkingDirectory=__BACKEND_DIR__
+EnvironmentFile=__BACKEND_DIR__/.env
+ExecStart=__BACKEND_DIR__/.venv/bin/uvicorn identity_system.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

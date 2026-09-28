@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "identity-system"
+description = "A central login service for sessionkit-backed apps - forward-auth identity for a reverse proxy."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+authors = [{ name = "Andrew Townsend" }]
+dynamic = ["version"]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "sessionkit @ git+https://github.com/atownsend247/bb-py-sessionkit.git@v0.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+]
+
+# --- Hatch --------------------------------------------------------------
+
+[tool.hatch.metadata]
+# sessionkit isn't on PyPI - it's a direct git+https reference, which
+# hatchling refuses to package unless this is explicitly opted into.
+allow-direct-references = true
+
+[tool.hatch.version]
+path = "src/identity_system/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/identity_system"]
+
+[tool.hatch.envs.default]
+features = ["dev"]
+
+[tool.hatch.envs.default.scripts]
+test = "pytest {args}"
+serve = "uvicorn identity_system.main:app --reload {args}"
+
+# --- pytest ---------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
