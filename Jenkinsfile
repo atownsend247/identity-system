@@ -26,7 +26,7 @@ pipeline {
     environment {
         // -- Proxmox LXC deploy target - fill in for your environment,
         // see deploy/remote-setup.sh --
-        DEPLOY_HOST        = '192.168.71.30'
+        DEPLOY_HOST        = '192.168.71.29'
         DEPLOY_USER        = 'root'
         BACKEND_DIR        = '/opt/identity-system'
         BACKEND_SERVICE    = 'identity-system-api'
