@@ -21,6 +21,7 @@ class Settings:
     cookie_secure: bool
     session_days: int
     issuer: str
+    admin_emails: frozenset[str]
 
     cookie_name: str = "identity_session"
 
@@ -32,7 +33,18 @@ class Settings:
             cookie_secure=_env("COOKIE_SECURE", "true").strip().lower() != "false",
             session_days=int(_env("SESSION_DAYS", "30")),
             issuer=_env("ISSUER", "identity-system"),
+            admin_emails=frozenset(
+                email.strip().lower()
+                for email in _env("ADMIN_EMAILS", "").split(",")
+                if email.strip()
+            ),
         )
+
+    def is_admin(self, email: str) -> bool:
+        """True if ``email`` is on the static IDENTITY_SYSTEM_ADMIN_EMAILS
+        allowlist - the only notion of authorization this service has, since
+        sessionkit itself has no roles/scopes concept."""
+        return email.strip().lower() in self.admin_emails
 
     def is_trusted_redirect(self, target: str) -> bool:
         """True if ``target`` is a same-site relative path, or points at

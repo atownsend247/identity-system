@@ -59,13 +59,15 @@ Then open `http://localhost:8000/login`.
 | `POST /2fa/confirm` | JSON `{"otp": "123456"}`; returns `{"recovery_codes": [...]}` (ten, shown once). |
 | `POST /2fa/disable` | JSON `{"current_password": ...}`. |
 | `POST /2fa/recovery-codes/regenerate` | JSON `{"current_password": ...}`; returns a fresh set of ten. |
+| `GET /admin` | HTML page listing every account (email, name, created, last login, 2FA). Restricted to `IDENTITY_SYSTEM_ADMIN_EMAILS` — no session redirects to `/login?rd=/admin`; a session that isn't on the allowlist gets a `403`. |
 
 All endpoints except `/login`/`/logout`/`/verify`/`/me` require the session
 cookie; sessionkit's `AuthError` subclasses are mapped to status codes the
 same way as the reference FastAPI example (401 / 404 / 409 / 422 — see
 [`docs/architecture.md#errors`](https://github.com/atownsend247/bb-py-sessionkit/blob/main/docs/architecture.md#errors)
 in sessionkit for the full table, including why `OtpInvalid` needs its own
-entry).
+entry). `/admin`, like `/login`, handles its own auth instead of going
+through that map — it's a page a human browses, not a JSON API.
 
 ## Wiring up a reverse proxy
 
@@ -110,19 +112,69 @@ version.
 
 See [`.env.example`](.env.example) — `IDENTITY_SYSTEM_DB`,
 `IDENTITY_SYSTEM_COOKIE_DOMAIN`, `IDENTITY_SYSTEM_COOKIE_SECURE`,
-`IDENTITY_SYSTEM_SESSION_DAYS`, `IDENTITY_SYSTEM_ISSUER`.
+`IDENTITY_SYSTEM_SESSION_DAYS`, `IDENTITY_SYSTEM_ISSUER`,
+`IDENTITY_SYSTEM_ADMIN_EMAILS`.
+
+`IDENTITY_SYSTEM_ADMIN_EMAILS` is a comma-separated, case-insensitive
+allowlist gating `GET /admin` — empty by default, so nobody can reach it
+until it's set. There's no in-app role management; sessionkit itself has no
+roles/scopes concept (see [Known gaps](#known-gaps-deliberate-not-oversights)),
+so this is the one place identity-system makes its own authorization call.
 
 `IDENTITY_SYSTEM_COOKIE_DOMAIN` does double duty: it's the `Domain=` on the
 session cookie (so it's shared across every subdomain of it) **and** the
 allow-list a post-login `?rd=` redirect is checked against, to stop that
 parameter being used for an open redirect.
 
+## Managing accounts
+
+There's no self-registration endpoint (see [Known gaps](#known-gaps-deliberate-not-oversights)
+below) — every account is created with sessionkit's own CLI, installed as
+the `sessionkit` console script alongside this package. It operates
+directly on the SQLite file this service opens, so `--db` — a **top-level**
+flag, it goes *before* the subcommand, not after — always has to point at
+whatever `IDENTITY_SYSTEM_DB` resolves to.
+
+```sh
+sessionkit --db ./auth.db add newperson@example.com --name "New Person"
+```
+
+You'll be prompted for a password twice (`Password:` / `Confirm password:`)
+— there's no `--password` flag, so this can't be scripted non-interactively.
+`--name` is optional; it defaults to the email's local part.
+
+Other account-management subcommands, all in the same
+`sessionkit --db <path> <command> ...` form:
+
+| | |
+|---|---|
+| `list` | list every account (id, email, name). |
+| `passwd <email>` | set a new password (prompts, same as `add`). |
+| `rename <email> <name>` | change the display name. |
+| `set-email <email> <new-email>` | change the login email. |
+| `delete <email>` | delete an account. |
+| `2fa-disable <email>` | turn off TOTP for an account — the lockout-recovery path if someone loses their authenticator and their recovery codes. |
+
+Run `sessionkit --help` (or `sessionkit <command> --help`) for the full
+reference — it's
+[sessionkit's own CLI](https://github.com/atownsend247/bb-py-sessionkit/blob/main/src/sessionkit/cli.py),
+not something this repo wraps or extends.
+
+**In production**, the CLI lives in the deployed service's own venv, and
+the db path is whatever `IDENTITY_SYSTEM_DB` is set to in
+`/opt/identity-system/.env` (`/opt/identity-system/data/auth.db` by
+default — see `deploy/identity-system-api.service`):
+
+```sh
+ssh root@<DEPLOY_HOST>
+/opt/identity-system/.venv/bin/sessionkit --db /opt/identity-system/data/auth.db add newperson@example.com
+```
+
 ## Known gaps (deliberate, not oversights)
 
 - **No self-registration endpoint.** Provision accounts with sessionkit's
-  own CLI (`sessionkit add ... --db <same path>`) — see
-  [Run it locally](#run-it-locally). Easy to add later
-  (`AuthService.create_user` already does the work) if you want it.
+  own CLI — see [Managing accounts](#managing-accounts) above. Easy to add
+  later (`AuthService.create_user` already does the work) if you want it.
 - **No CSRF token on the login form.** `SameSite=Lax` covers the common
   cross-site POST case but isn't a complete answer. Same posture sessionkit
   itself takes with rate-limiting: an explicit, documented gap.

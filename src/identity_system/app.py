@@ -23,7 +23,7 @@ from sessionkit import (
 )
 
 from .config import Settings
-from .templates import render_login
+from .templates import render_admin_users, render_login
 
 # Same shape as sessionkit's own examples/fastapi_app.py: one map from
 # AuthError subclass to status code, checked with isinstance (first match
@@ -177,6 +177,22 @@ def create_app(auth: AuthService, settings: Settings) -> FastAPI:
     def regenerate_recovery_codes(payload: dict, user: User = Depends(current_user)):
         codes = auth.regenerate_recovery_codes(user.id, payload.get("current_password", ""))
         return {"recovery_codes": codes}
+
+    # --------------------------------------------------------------- admin
+
+    @app.get("/admin", response_class=HTMLResponse)
+    def admin_users(request: Request):
+        # Handles its own auth like /login does, rather than Depends(current_user)
+        # + _ERROR_STATUS - this is a page a human browses directly, so a
+        # missing/expired session should redirect to sign in, not return a
+        # bare 401 JSON body.
+        try:
+            user = current_user(request)
+        except AuthenticationError:
+            return RedirectResponse(url="/login?rd=/admin", status_code=303)
+        if not settings.is_admin(user.email):
+            return HTMLResponse("Forbidden", status_code=403)
+        return render_admin_users(auth.list_users())
 
     return app
 

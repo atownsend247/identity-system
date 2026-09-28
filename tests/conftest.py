@@ -26,6 +26,7 @@ def settings() -> Settings:
         cookie_secure=False,  # TestClient talks plain HTTP
         session_days=30,
         issuer="identity-system-test",
+        admin_emails=frozenset({"admin@example.com"}),
     )
 
 

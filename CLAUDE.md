@@ -16,9 +16,10 @@ provider — no client registration, no signed tokens, no consent screens. See
     file.
   - `config.py` — `Settings`, read from `IDENTITY_SYSTEM_*` env vars
     (`.env.example` has the full list). `Settings.is_trusted_redirect()` is
-    the open-redirect guard for `/login`'s `?rd=`.
-  - `templates.py` — the one inline HTML template (login form). No JS
-    framework, no build step, no external stylesheet.
+    the open-redirect guard for `/login`'s `?rd=`; `Settings.is_admin()` is
+    the `GET /admin` allowlist check.
+  - `templates.py` — two inline HTML templates (login form, admin user
+    list). No JS framework, no build step, no external stylesheet.
   - `main.py` — the only module that reads env vars or opens a real
     `SqliteAuthStore`. `uvicorn identity_system.main:app` entrypoint.
 - `tests/conftest.py` — `store` (in-memory `SqliteAuthStore`), `settings`
@@ -70,9 +71,11 @@ uvicorn identity_system.main:app --reload
   subclass `AuthenticationError` — `OtpInvalid` is the trap: unlike
   `OtpRequired`/`OtpLocked` it's a direct `AuthError` subclass, so it's easy
   to forget and get a bare 500 instead of a 422 the first time a route that
-  can raise it (`/2fa/confirm`) is exercised for real. `/login` is the one
-  route that doesn't use this map — it catches `AuthError` itself so it can
-  re-render the HTML form instead of returning JSON.
+  can raise it (`/2fa/confirm`) is exercised for real. `/login` and `/admin`
+  are the two routes that don't use this map — `/login` catches `AuthError`
+  itself so it can re-render the HTML form instead of returning JSON;
+  `/admin` catches `AuthenticationError` itself so it can redirect to
+  `/login?rd=/admin` instead of returning a bare 401.
 - **Every `?rd=` (and any future redirect target) must go through
   `Settings.is_trusted_redirect()` before being used.** It's the only thing
   stopping `/login?rd=https://evil.example/phish` from being a working
@@ -98,7 +101,11 @@ uvicorn identity_system.main:app --reload
 - **No per-app authorization model.** `/verify` and `/me` answer "who is
   this", not "can they do X in this app" — sessionkit has no roles/scopes
   concept. Each downstream app owns its own authorization decisions based on
-  the identity it's given.
+  the identity it's given. `GET /admin` is the one exception: it's this
+  service's own page, not a downstream app's, so it makes its own call via
+  a static `IDENTITY_SYSTEM_ADMIN_EMAILS` allowlist (`Settings.is_admin()`)
+  rather than a real role stored anywhere — no in-app management, edit
+  `.env` and restart to change who's on it.
 - **`SqliteAuthStore` is single-writer-friendly, not a production multi-app
   answer.** Fine for one instance; a real multi-writer deployment should
   implement `AuthStore` against Postgres instead (structural change only —
