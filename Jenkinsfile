@@ -5,7 +5,7 @@
 // backend with no frontend build (see CLAUDE.md) - Test just builds a
 // throwaway venv and installs the package the same way README.md's local
 // dev instructions do (`pip install -e ".[dev]"`; there's no uv.lock here
-// to make `uv sync` meaningful), after checking the agent's system python3
+// to make `uv sync` meaningful), after checking the agent's system python
 // is actually 3.13 (see pyproject.toml/.python-version) rather than
 // silently testing against whatever's installed. The Deploy stage rsyncs
 // this checkout to
@@ -48,18 +48,18 @@ pipeline {
         stage('Test') {
             steps {
                 // Fails loudly rather than silently testing against the
-                // wrong interpreter if this agent's system python3 isn't
+                // wrong interpreter if this agent's system python isn't
                 // 3.13 (see pyproject.toml's requires-python /
                 // .python-version, and deploy/remote-setup.sh's matching
                 // check for the production side of this same assumption).
                 sh '''
-                    python_version="$(python3 -c 'import platform; print(platform.python_version())')"
+                    python_version="$(python -c 'import platform; print(platform.python_version())')"
                     case "$python_version" in
                         3.13.*) ;;
-                        *) echo "Jenkins agent python3 is $python_version, not 3.13.x" >&2; exit 1 ;;
+                        *) echo "Jenkins agent python is $python_version, not 3.13.x" >&2; exit 1 ;;
                     esac
 
-                    python3 -m venv .venv
+                    python -m venv .venv
                     .venv/bin/pip install --no-cache-dir -e ".[dev]"
                     mkdir -p reports
                     .venv/bin/pytest --junitxml=reports/junit.xml
