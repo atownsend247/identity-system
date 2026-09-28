@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs ON the deploy target (a Debian/Ubuntu Proxmox LXC), invoked over SSH
-# by deploy/deploy.sh after it rsyncs the repo there. Also runnable
-# standalone if you SSH in yourself: `BACKEND_DIR=/opt/identity-system
+# Runs ON the deploy target - a Debian 13 (trixie) Proxmox LXC, invoked
+# over SSH by deploy/deploy.sh after it rsyncs the repo there. Also
+# runnable standalone if you SSH in yourself: `BACKEND_DIR=/opt/identity-system
 # bash deploy/remote-setup.sh` (both env vars below default sensibly if
 # unset, so a bare `bash deploy/remote-setup.sh` from the checkout works
 # too).
@@ -10,6 +10,12 @@
 # venv + pip, same install this project's README/Dockerfile always used -
 # there's no uv.lock here to make `uv sync` meaningful), and installs +
 # reloads the systemd unit and nginx config from this directory.
+#
+# Relies on Debian trixie's system `python3` already being 3.13 (see
+# pyproject.toml's requires-python / .python-version) rather than pinning
+# a specific interpreter itself - the version check below fails loudly
+# instead of silently building a venv against the wrong Python if this
+# ever runs against an older Debian/Ubuntu release.
 #
 # Does NOT provision any accounts (that's a one-time manual step - see
 # README.md's "sessionkit --db <path> add ...") and does NOT create
@@ -33,6 +39,14 @@ REQUIRED_PACKAGES=(python3-venv python3-pip nginx curl rsync)
 echo "Installing required packages (${REQUIRED_PACKAGES[*]})..."
 apt-get update
 apt-get install -y --no-install-recommends "${REQUIRED_PACKAGES[@]}"
+
+PYTHON_VERSION="$(python3 -c 'import platform; print(platform.python_version())')"
+if [[ "${PYTHON_VERSION}" != 3.13.* ]]; then
+    echo "System python3 is ${PYTHON_VERSION}, not 3.13.x - this script" >&2
+    echo "assumes a Debian 13 (trixie) target where python3 is already" >&2
+    echo "3.13. Install python3.13 yourself first (or move to trixie)." >&2
+    exit 1
+fi
 
 if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
     echo "Creating system user '${SERVICE_USER}'..."
