@@ -20,8 +20,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=identity-system
-Group=identity-system
+User=root
+Group=root
 WorkingDirectory=__BACKEND_DIR__
 EnvironmentFile=__BACKEND_DIR__/.env
 ExecStart=__BACKEND_DIR__/.venv/bin/uvicorn identity_system.main:app --host 127.0.0.1 --port 8000
