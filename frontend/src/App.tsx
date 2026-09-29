@@ -44,7 +44,7 @@ function App() {
           <Route path="/" element={<Apps />} />
           <Route path="/login" element={<Login />} />
           <Route path="/admin" element={<Admin />} />
-          <Route path="/account" element={<Account user={user} />} />
+          <Route path="/account" element={<Account user={user} onUserUpdated={setUser} />} />
         </Routes>
       </main>
     </BrowserRouter>
