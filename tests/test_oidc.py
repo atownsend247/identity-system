@@ -168,6 +168,7 @@ def test_full_authorization_code_pkce_round_trip(client, auth, oidc_client_secre
     assert claims["aud"] == "jenkins"
     assert claims["email"] == "alex@example.com"
     assert claims["name"] == "Alex"
+    assert claims["preferred_username"] == "alex"
     assert claims["nonce"] == "n-0s6_wz"
 
     userinfo_resp = client.get(
@@ -178,6 +179,7 @@ def test_full_authorization_code_pkce_round_trip(client, auth, oidc_client_secre
     assert info["sub"] == claims["sub"]
     assert info["email"] == "alex@example.com"
     assert info["name"] == "Alex"
+    assert info["preferred_username"] == "alex"
 
 
 def test_code_cannot_be_reused(client, auth, oidc_client_secret):

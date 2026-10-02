@@ -152,6 +152,11 @@ def _claims_for_scope(scope: str, *, email: str, name: str) -> dict:
         claims["email_verified"] = True
     if "profile" in scopes:
         claims["name"] = name
+        # sessionkit's User has no separate username field - the email
+        # local part is the natural stand-in. Per the OIDC spec this claim
+        # is explicitly a display hint, not a stable/unique identifier
+        # (that's `sub`), so it doesn't need to be unique across domains.
+        claims["preferred_username"] = email.split("@", 1)[0]
     return claims
 
 
@@ -199,7 +204,7 @@ def create_oidc_router(
                 "client_secret_post",
             ],
             "code_challenge_methods_supported": ["S256"],
-            "claims_supported": ["sub", "email", "email_verified", "name"],
+            "claims_supported": ["sub", "email", "email_verified", "name", "preferred_username"],
         }
 
     @router.get("/api/oidc/jwks.json")
@@ -365,7 +370,7 @@ def create_oidc_router(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         result = {"sub": claims["sub"]}
-        for key in ("email", "email_verified", "name"):
+        for key in ("email", "email_verified", "name", "preferred_username"):
             if key in claims:
                 result[key] = claims[key]
         return result
