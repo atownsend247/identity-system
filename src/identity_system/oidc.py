@@ -38,7 +38,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import unquote_plus, urlencode
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -286,7 +286,14 @@ def create_oidc_router(
         if auth_header.lower().startswith("basic "):
             try:
                 decoded = base64.b64decode(auth_header[len("basic "):]).decode()
-                client_id, client_secret = decoded.split(":", 1)
+                raw_id, raw_secret = decoded.split(":", 1)
+                # RFC 6749 Appendix B: client_id/client_secret are
+                # application/x-www-form-urlencoded *before* Basic-encoding
+                # - skipping this decode step meant any secret containing
+                # +, /, =, % (i.e. almost anything generated with
+                # `openssl rand -base64 ...`) never matched, because we'd
+                # be comparing the still-percent-encoded string.
+                client_id, client_secret = unquote_plus(raw_id), unquote_plus(raw_secret)
             except Exception:
                 return JSONResponse(status_code=401, content={"error": "invalid_client"})
 

@@ -3,9 +3,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 import jwt
+from fastapi.testclient import TestClient
+
+from identity_system.app import create_app
+from identity_system.oidc_clients import OidcClient, hash_client_secret
 
 REDIRECT_URI = "https://jenkins.example.com/securityRealm/finishLogin"
 
@@ -232,3 +236,34 @@ def test_userinfo_rejects_garbage_bearer_token(client):
 def test_userinfo_requires_bearer_scheme(client):
     resp = client.get("/api/oidc/userinfo")
     assert resp.status_code == 401
+
+
+def test_token_accepts_http_basic_auth_with_percent_encoded_secret(auth, settings, apps, oidc_signing_key):
+    # RFC 6749 Appendix B: Basic-auth credentials are
+    # application/x-www-form-urlencoded before being base64-encoded. A
+    # secret containing characters like +, /, = (as almost any
+    # `openssl rand -base64 ...`-generated secret will) must round-trip
+    # correctly through that encoding, not just the plain ASCII secret the
+    # other tests use.
+    secret = "tricky+secret/with=chars"
+    registered_client = OidcClient(
+        client_id="jenkins",
+        client_secret_hash=hash_client_secret(secret),
+        redirect_uris=frozenset({REDIRECT_URI}),
+        allowed_scopes=frozenset({"openid"}),
+    )
+    app = create_app(auth, settings, apps, {"jenkins": registered_client}, oidc_signing_key)
+    http_client = TestClient(app, base_url="http://sso.example.com")
+    _login(http_client, auth)
+
+    authorize_resp, _ = _authorize(http_client, use_pkce=False)
+    code = _code_from(authorize_resp)
+
+    basic = base64.b64encode(f"jenkins:{quote_plus(secret)}".encode()).decode()
+    resp = http_client.post(
+        "/api/oidc/token",
+        data={"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT_URI},
+        headers={"Authorization": f"Basic {basic}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["token_type"] == "Bearer"
