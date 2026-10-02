@@ -62,7 +62,15 @@ if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
     python3 -m venv "${BACKEND_DIR}/.venv"
 fi
 "${BACKEND_DIR}/.venv/bin/pip" install --no-cache-dir --upgrade pip
-"${BACKEND_DIR}/.venv/bin/pip" install --no-cache-dir "${BACKEND_DIR}"
+# --force-reinstall matters here: this installs from a local directory path,
+# not a version-pinned requirement, and pyproject.toml's version is bumped
+# manually (see src/identity_system/__init__.py) - without this flag, pip
+# resolves "identity-system" to the same version already in the venv and
+# skips reinstalling altogether, silently leaving the OLD code running even
+# though rsync just synced new source here. Not just a style nit: this bit
+# the OIDC rollout for real (routes 404'd post-deploy because the venv was
+# still serving the pre-OIDC build).
+"${BACKEND_DIR}/.venv/bin/pip" install --no-cache-dir --force-reinstall "${BACKEND_DIR}"
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${BACKEND_DIR}/.venv"
 
 if [[ ! -f "${BACKEND_DIR}/.env" ]]; then
