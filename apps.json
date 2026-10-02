@@ -8,5 +8,15 @@
     "name": "Invoices",
     "url": "https://invoices.atathome.me",
     "description": "Quotes, invoices, and PDF export."
+  },
+  {
+    "name": "Inventory",
+    "url": "https://inventory.atathome.me",
+    "description": "France move inventory"
+  },
+  {
+    "name": "Jenkins",
+    "url": "https://jenkins.atathome.me",
+    "description": "Jenkins CI/CD tooling"
   }
 ]
