@@ -82,7 +82,7 @@ Then open `http://localhost:5173/`.
 | `GET /api/apps` | the static apps directory (`apps.json`) as JSON — public, no session required. |
 | `GET /.well-known/openid-configuration` | OIDC discovery document. Spec-fixed path — the one exception to everything new living under `/api/`. |
 | `GET /api/oidc/jwks.json` | the public half of the signing key, as a JWK set. |
-| `GET /api/oidc/authorize` | the OAuth2 authorization endpoint. No session → redirects to `/login?rd=...` (same machinery as above); signed in → redirects straight back to the client's `redirect_uri` with a one-time `code` (no consent screen — see above). PKCE (`S256`) is required. |
+| `GET /api/oidc/authorize` | the OAuth2 authorization endpoint. No session → redirects to `/login?rd=...` (same machinery as above); signed in → redirects straight back to the client's `redirect_uri` with a one-time `code` (no consent screen — see above). PKCE (`S256`) is supported and verified if the client sends it, but not required — every registered client is confidential (authenticates at `/api/oidc/token` with its `client_secret` regardless), and PKCE exists to protect clients that can't hold one. |
 | `POST /api/oidc/token` | exchanges a `code` (+ `code_verifier`) for `{id_token, access_token, token_type, expires_in, scope}`. Client auth via HTTP Basic or `client_secret_post`. |
 | `GET /api/oidc/userinfo` | `Authorization: Bearer <access_token>` → the scope-gated claims (`sub`, `email`, `name`). |
 

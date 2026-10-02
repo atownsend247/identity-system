@@ -34,15 +34,13 @@ def _pkce_pair():
     return verifier, challenge
 
 
-def _authorize(client, *, scope="openid", **overrides):
-    verifier, challenge = _pkce_pair()
-    params = {
-        **AUTHORIZE_PARAMS,
-        "scope": scope,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        **overrides,
-    }
+def _authorize(client, *, scope="openid", use_pkce=True, **overrides):
+    verifier = None
+    params = {**AUTHORIZE_PARAMS, "scope": scope, **overrides}
+    if use_pkce:
+        verifier, challenge = _pkce_pair()
+        params.setdefault("code_challenge", challenge)
+        params.setdefault("code_challenge_method", "S256")
     resp = client.get("/api/oidc/authorize", params=params, follow_redirects=False)
     return resp, verifier
 
@@ -52,18 +50,19 @@ def _code_from(redirect_resp) -> str:
     return query["code"][0]
 
 
-def _token_request(client, *, code, verifier, client_secret, client_id="jenkins", redirect_uri=REDIRECT_URI):
-    return client.post(
-        "/api/oidc/token",
-        data={
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code_verifier": verifier,
-        },
-    )
+def _token_request(
+    client, *, code, client_secret, verifier=None, client_id="jenkins", redirect_uri=REDIRECT_URI
+):
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    if verifier is not None:
+        data["code_verifier"] = verifier
+    return client.post("/api/oidc/token", data=data)
 
 
 def test_discovery_document(client, settings):
@@ -121,15 +120,27 @@ def test_authorize_rejects_scope_not_allowed_for_client(client, auth):
     assert query["error"] == ["invalid_scope"]
 
 
-def test_authorize_rejects_missing_pkce(client, auth):
+def test_authorize_rejects_code_challenge_with_unsupported_method(client, auth):
     _login(client, auth)
-    resp = client.get(
-        "/api/oidc/authorize",
-        params={**AUTHORIZE_PARAMS, "scope": "openid"},
-        follow_redirects=False,
-    )
+    resp, _ = _authorize(client, use_pkce=False, code_challenge="abc", code_challenge_method="plain")
     query = parse_qs(urlparse(resp.headers["location"]).query)
     assert query["error"] == ["invalid_request"]
+
+
+def test_full_round_trip_without_pkce(client, auth, oidc_client_secret):
+    # Confidential clients (every client registered here) authenticate at
+    # /api/oidc/token with their client_secret regardless - PKCE is
+    # supported but not required, since an RP not sending it (e.g. Jenkins'
+    # OIDC plugin without PKCE enabled) must still be able to complete the
+    # flow (see oidc.py's module docstring).
+    _login(client, auth)
+    authorize_resp, verifier = _authorize(client, use_pkce=False)
+    assert verifier is None
+    code = _code_from(authorize_resp)
+
+    token_resp = _token_request(client, code=code, client_secret=oidc_client_secret)
+    assert token_resp.status_code == 200
+    assert token_resp.json()["token_type"] == "Bearer"
 
 
 def test_full_authorization_code_pkce_round_trip(client, auth, oidc_client_secret):

@@ -1,5 +1,5 @@
-"""A minimal OAuth2 Authorization Code + PKCE + OIDC layer, sitting
-alongside (not replacing) the cookie-session/forward-auth system in
+"""A minimal OAuth2 Authorization Code (+ optional PKCE) + OIDC layer,
+sitting alongside (not replacing) the cookie-session/forward-auth system in
 ``app.py``. Built for a small number of trusted relying parties on your own
 network (Jenkins' OpenID Connect plugin was the first) - not a general-
 purpose multi-tenant IdP:
@@ -8,6 +8,14 @@ purpose multi-tenant IdP:
   auto-approved for a signed-in user, the same trust posture
   ``IDENTITY_SYSTEM_ADMIN_EMAILS``/``apps.json`` already take (whoever can
   edit that file is already trusted).
+- PKCE is verified when a client uses it, but not required. Every
+  registered client here is confidential (it authenticates at
+  ``/api/oidc/token`` with a ``client_secret`` regardless), and PKCE exists
+  to protect *public* clients that can't hold one - mandating it
+  unconditionally just broke RPs that don't send it (Jenkins' OIDC plugin
+  without PKCE explicitly enabled is one), surfacing there as a generic
+  "Could not extract credentials from request" rather than anything
+  OAuth-shaped, because the request never reached our own error handling.
 - Authorization codes live in memory only (``AuthorizationCodeStore``),
   one-time-use, ~60s TTL. A restart drops any mid-flight login - the user
   just retries - so this deliberately isn't persisted; sessionkit's
@@ -91,7 +99,7 @@ class _AuthCode:
     name: str
     scope: str
     nonce: str | None
-    code_challenge: str
+    code_challenge: str | None
     expires_at: float
 
 
@@ -228,9 +236,19 @@ def create_oidc_router(
         if not requested_scopes <= client.allowed_scopes:
             return error_redirect("invalid_scope", "scope not allowed for this client")
 
-        code_challenge = params.get("code_challenge", "")
-        if params.get("code_challenge_method", "") != "S256" or not code_challenge:
-            return error_redirect("invalid_request", "PKCE (code_challenge_method=S256) is required")
+        # PKCE is verified when a client uses it, but not required: it
+        # exists to protect *public* clients that can't hold a secret, and
+        # every client registered here is confidential (authenticates at
+        # /api/oidc/token with its client_secret regardless) - mandating it
+        # unconditionally broke RPs that don't send it (e.g. Jenkins' OIDC
+        # plugin without PKCE explicitly enabled), which showed up there as
+        # a generic "Could not extract credentials from request" because
+        # our /token rejected the request before even reaching OAuth-shaped
+        # error handling.
+        code_challenge = params.get("code_challenge") or None
+        code_challenge_method = params.get("code_challenge_method") or None
+        if code_challenge is not None and code_challenge_method != "S256":
+            return error_redirect("invalid_request", "only code_challenge_method=S256 is supported")
 
         token = request.cookies.get(settings.cookie_name)
         try:
@@ -260,7 +278,7 @@ def create_oidc_router(
         grant_type: str = Form(...),
         code: str = Form(...),
         redirect_uri: str = Form(...),
-        code_verifier: str = Form(...),
+        code_verifier: str | None = Form(None),
         client_id: str | None = Form(None),
         client_secret: str | None = Form(None),
     ):
@@ -283,11 +301,14 @@ def create_oidc_router(
         if entry is None or entry.client_id != client_id or entry.redirect_uri != redirect_uri:
             return JSONResponse(status_code=400, content={"error": "invalid_grant"})
 
-        if not _verify_pkce(entry.code_challenge, code_verifier):
-            return JSONResponse(
-                status_code=400,
-                content={"error": "invalid_grant", "error_description": "PKCE verification failed"},
-            )
+        # Only verified if /authorize actually received a code_challenge -
+        # see the matching comment there for why PKCE isn't mandatory.
+        if entry.code_challenge is not None:
+            if not code_verifier or not _verify_pkce(entry.code_challenge, code_verifier):
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "invalid_grant", "error_description": "PKCE verification failed"},
+                )
 
         claims = {
             "sub": entry.user_id,

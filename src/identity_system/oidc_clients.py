@@ -29,12 +29,28 @@ class OidcClient:
 def load_oidc_clients(path: str) -> dict[str, OidcClient]:
     """Keyed by client_id. A missing file (no relying parties registered
     yet) is not an error - every OIDC endpoint just rejects every
-    client_id until one exists, the same posture ``load_apps`` takes."""
+    client_id until one exists, the same posture ``load_apps`` takes.
+
+    This is called unconditionally at startup (see main.py) - a malformed
+    file here would otherwise crash the *entire* service, not just the
+    OIDC surface, with a bare ``TypeError`` pointing at an indexing line
+    instead of the actual mistake. The one check below exists because it's
+    a genuinely easy mistake to make by hand: a single registered client
+    written as a bare ``{...}`` object instead of a one-element ``[...]``
+    list (see ``oidc_clients.json.example``) parses fine as JSON, but then
+    iterates over the object's *keys* (strings) instead of the object
+    itself."""
     try:
         text = Path(path).read_text()
     except FileNotFoundError:
         return {}
     entries = json.loads(text)
+    if not isinstance(entries, list):
+        raise ValueError(
+            f"{path} must be a JSON array of client objects (even for a single "
+            f"client) - see oidc_clients.json.example. Got a top-level "
+            f"{type(entries).__name__} instead."
+        )
     return {
         entry["client_id"]: OidcClient(
             client_id=entry["client_id"],
