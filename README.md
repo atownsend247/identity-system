@@ -8,10 +8,16 @@ from. Also its own small hub: `/` is an apps directory (the default landing
 page, visible whether or not you're signed in) and `/account` is where a
 signed-in user sees their own details.
 
-Deliberately not an OAuth2/OIDC provider: no client registration, no signed
-tokens, no consent screens. It works when every app behind it is yours (or
-otherwise trusts the same proxy) — the proxy is what enforces the check, not
-each app individually.
+The forward-auth model works when every app behind it is yours (or
+otherwise trusts the same proxy) and can sit behind that proxy in the first
+place — it's not a fit for something like Jenkins, which ships its own
+built-in OpenID Connect security realm instead. For that handful of cases,
+identity-system is *also* a small OAuth2 Authorization Code + PKCE + OIDC
+provider (`/.well-known/openid-configuration`, `/api/oidc/*`) — see
+[OIDC for other relying parties](#oidc-for-other-relying-parties) below.
+It's a minimal one: a static client registry (no self-service client
+registration) and no consent screen (any registered client is auto-approved
+for a signed-in user — the same trust posture as `apps.json`).
 
 ## How it fits together
 
@@ -74,6 +80,11 @@ Then open `http://localhost:5173/`.
 | `POST /2fa/recovery-codes/regenerate` | JSON `{"current_password": ...}`; returns a fresh set of ten. |
 | `GET /api/admin/users` | every account (id, email, name, created, last login, 2FA) as JSON. Restricted to `IDENTITY_SYSTEM_ADMIN_EMAILS` — `401` with no session, `403` if the session isn't on the allowlist. |
 | `GET /api/apps` | the static apps directory (`apps.json`) as JSON — public, no session required. |
+| `GET /.well-known/openid-configuration` | OIDC discovery document. Spec-fixed path — the one exception to everything new living under `/api/`. |
+| `GET /api/oidc/jwks.json` | the public half of the signing key, as a JWK set. |
+| `GET /api/oidc/authorize` | the OAuth2 authorization endpoint. No session → redirects to `/login?rd=...` (same machinery as above); signed in → redirects straight back to the client's `redirect_uri` with a one-time `code` (no consent screen — see above). PKCE (`S256`) is required. |
+| `POST /api/oidc/token` | exchanges a `code` (+ `code_verifier`) for `{id_token, access_token, token_type, expires_in, scope}`. Client auth via HTTP Basic or `client_secret_post`. |
+| `GET /api/oidc/userinfo` | `Authorization: Bearer <access_token>` → the scope-gated claims (`sub`, `email`, `name`). |
 
 All endpoints except `POST /api/login`/`POST /logout`/`GET /verify`/`GET /me`/`GET /api/apps`
 require the session cookie; sessionkit's `AuthError` subclasses are mapped
@@ -131,12 +142,65 @@ Traefik's `ForwardAuth` follows a redirect itself less cleanly than nginx's
 `/login?rd=...` per Traefik's own forward-auth-with-redirect docs for your
 version.
 
+## OIDC for other relying parties
+
+For an app that speaks OIDC itself rather than sitting behind the reverse
+proxy (Jenkins' bundled "OpenId Connect Authentication" plugin was the
+first case) — point it at this service's discovery document instead of
+wiring up `/verify`:
+
+```
+https://sso.example.com/.well-known/openid-configuration
+```
+
+**Registering an OIDC client**: there's no self-service registration
+endpoint (same posture as account provisioning — see
+[Managing accounts](#managing-accounts)). Add an entry to
+`IDENTITY_SYSTEM_OIDC_CLIENTS_PATH` (`./oidc_clients.json` by default — see
+[`oidc_clients.json.example`](oidc_clients.json.example) for the shape) by
+hand:
+
+```sh
+python -c "from identity_system.oidc_clients import hash_client_secret; print(hash_client_secret('a-long-random-secret'))"
+```
+
+```json
+{
+  "client_id": "jenkins",
+  "client_secret_hash": "<output from above>",
+  "redirect_uris": ["https://jenkins.example.com/securityRealm/finishLogin"],
+  "allowed_scopes": ["openid", "email", "profile"]
+}
+```
+
+Restart the service (this file isn't live-reloaded, same as `apps.json`).
+`redirect_uris` are matched **exactly** — no domain-suffix matching the way
+`?rd=` gets on `/api/login` — so include the full path the relying party
+actually redirects back to.
+
+**Jenkins' OpenId Connect plugin**, concretely: install the plugin,
+then under *Configure Global Security* → *Security Realm* → *OpenId
+Connect*:
+
+- Client ID / Client Secret: the values you just registered above.
+- Configuration mode: "Automatic configuration" with the discovery URL
+  above (or fill in the individual endpoints from it by hand).
+- Scopes: `openid email profile`.
+
+Authorization *inside* Jenkins (who can do what once they're signed in)
+stays Jenkins' own Role-Based Authorization Strategy — identity-system
+still only answers "who is this", not "what can they do here", the same
+posture it takes with every other app (see
+[Known gaps](#known-gaps-deliberate-not-oversights)).
+
 ## Configuration
 
 See [`.env.example`](.env.example) — `IDENTITY_SYSTEM_DB`,
 `IDENTITY_SYSTEM_COOKIE_DOMAIN`, `IDENTITY_SYSTEM_COOKIE_SECURE`,
 `IDENTITY_SYSTEM_SESSION_DAYS`, `IDENTITY_SYSTEM_ISSUER`,
-`IDENTITY_SYSTEM_ADMIN_EMAILS`, `IDENTITY_SYSTEM_APPS_PATH`.
+`IDENTITY_SYSTEM_ADMIN_EMAILS`, `IDENTITY_SYSTEM_APPS_PATH`,
+`IDENTITY_SYSTEM_OIDC_ISSUER_URL`, `IDENTITY_SYSTEM_OIDC_CLIENTS_PATH`,
+`IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH`.
 
 `IDENTITY_SYSTEM_ADMIN_EMAILS` is a comma-separated, case-insensitive
 allowlist gating `GET /api/admin/users` — empty by default, so nobody can
@@ -223,6 +287,19 @@ ssh root@<DEPLOY_HOST>
   multi-writer production setup should implement `AuthStore` against
   Postgres instead (structural — see sessionkit's
   `docs/architecture.md#bring-your-own-storage`).
+- **No OIDC consent screen.** Any client in `oidc_clients.json` is
+  auto-approved for a signed-in user — fine for a handful of relying
+  parties you run yourself, not a general-purpose multi-tenant posture.
+- **OIDC authorization codes live in memory, not in a database.** One-time
+  use, ~60 second lifetime — a restart mid-login just means the user
+  retries. Not safe to run multiple instances of this service behind a
+  load balancer for that reason (same single-instance caveat as
+  `SqliteAuthStore` above).
+- **No OIDC refresh tokens, no self-service client registration.** Add a
+  relying party by hand-editing `oidc_clients.json` (see
+  [OIDC for other relying parties](#oidc-for-other-relying-parties)); a
+  relying party re-runs the authorization flow in the browser when its
+  session lapses rather than silently refreshing in the background.
 
 ## Tests
 
@@ -231,7 +308,8 @@ pytest                       # backend
 cd frontend && npm test      # frontend
 ```
 
-Backend tests run entirely against an in-memory `SqliteAuthStore` via
-`identity_system.app.create_app(auth, settings, apps)` — no real file
-touched. Frontend tests (vitest + testing-library) mock `fetch` per
-component — see `frontend/src/Login.test.tsx` for the pattern.
+Backend tests run entirely against an in-memory `SqliteAuthStore` and an
+ephemeral in-memory signing key via
+`identity_system.app.create_app(auth, settings, apps, oidc_clients, oidc_signing_key)`
+— no real file touched. Frontend tests (vitest + testing-library) mock
+`fetch` per component — see `frontend/src/Login.test.tsx` for the pattern.

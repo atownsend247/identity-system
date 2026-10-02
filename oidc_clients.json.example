@@ -1,0 +1,8 @@
+[
+  {
+    "client_id": "jenkins",
+    "client_secret_hash": "REPLACE_ME - see README.md#registering-an-oidc-client",
+    "redirect_uris": ["https://jenkins.example.com/securityRealm/finishLogin"],
+    "allowed_scopes": ["openid", "email", "profile"]
+  }
+]

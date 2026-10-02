@@ -14,6 +14,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
+    "pyjwt[crypto]>=2.8",
     "sessionkit @ git+https://github.com/atownsend247/bb-py-sessionkit.git@v0.4.0",
 ]
 

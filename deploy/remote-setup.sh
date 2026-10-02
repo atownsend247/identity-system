@@ -82,6 +82,20 @@ else
         echo "excluded from that sweep). Move the db file into ${BACKEND_DIR}/data/," >&2
         echo "point IDENTITY_SYSTEM_DB at it there, and restart ${SERVICE_NAME}." >&2
     fi
+
+    # Same reasoning as IDENTITY_SYSTEM_DB above, for the OIDC signing key
+    # oidc.load_or_create_signing_key provisions on first run - it's a
+    # secret, not a .db file, so it has no belt-and-suspenders *.ext
+    # exclude rule in deploy.sh; data/ is the only thing protecting it.
+    key_path="$(grep -E '^IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH=' "${BACKEND_DIR}/.env" | tail -1 | cut -d= -f2-)"
+    if [[ -n "${key_path}" && "${key_path}" != "${BACKEND_DIR}/data/"* ]]; then
+        echo "WARNING: IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH in ${BACKEND_DIR}/.env is" >&2
+        echo "'${key_path}', not inside ${BACKEND_DIR}/data/ - deploy.sh's rsync --delete" >&2
+        echo "will wipe it on the next deploy, silently rotating the OIDC signing key" >&2
+        echo "and breaking every relying party until they re-fetch the new JWKS. Move" >&2
+        echo "it into ${BACKEND_DIR}/data/, point IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH" >&2
+        echo "at it there, and restart ${SERVICE_NAME}." >&2
+    fi
 fi
 
 echo "Installing systemd unit..."

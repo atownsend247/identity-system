@@ -2,30 +2,49 @@
 
 A central login service for [sessionkit](https://github.com/atownsend247/bb-py-sessionkit)-backed
 apps: sits behind a reverse proxy's forward-auth hook (`GET /verify`) and is
-the one place a browser types a password (`/login`). Not an OAuth2/OIDC
-provider — no client registration, no signed tokens, no consent screens.
-Also its own small user-facing hub: `/` is an apps directory (the default
-landing page, public whether or not you're signed in) and `/account` is
-where a signed-in user sees their own details. See `README.md` for the full
-endpoint list and proxy wiring examples (nginx `auth_request`, Traefik
-`ForwardAuth`).
+the one place a browser types a password (`/login`). Also a minimal OAuth2
+Authorization Code + PKCE + OIDC provider (`/.well-known/openid-configuration`,
+`/api/oidc/*` — see `oidc.py`) for relying parties that can't sit behind the
+proxy and speak OIDC themselves (Jenkins' bundled plugin was the first) —
+deliberately minimal: a static client registry (`oidc_clients.json`, no
+self-service registration) and no consent screen (any registered client is
+auto-approved, same trust posture as `apps.json`). Also its own small
+user-facing hub: `/` is an apps directory (the default landing page, public
+whether or not you're signed in) and `/account` is where a signed-in user
+sees their own details. See `README.md` for the full endpoint list, proxy
+wiring examples (nginx `auth_request`, Traefik `ForwardAuth`), and OIDC
+client registration.
 
 ## Where things are
 
 - `src/identity_system/` — a pure JSON API, no server-rendered HTML at all
   (`frontend/` owns every page — see below).
-  - `app.py` — `create_app(auth: AuthService, settings: Settings, apps: list[dict]) -> FastAPI`.
+  - `app.py` — `create_app(auth: AuthService, settings: Settings, apps: list[dict], oidc_clients: dict[str, OidcClient], oidc_signing_key: rsa.RSAPrivateKey) -> FastAPI`.
     All routes live here. Takes an already-built `AuthService` (same shape as
-    sessionkit's own `examples/fastapi_app.py`) and the static apps list, so
-    tests never touch a real file.
+    sessionkit's own `examples/fastapi_app.py`), the static apps list, and
+    the (also static) OIDC client registry + signing key, so tests never
+    touch a real file. `oidc_signing_key=None` leaves the OIDC routes
+    unmounted entirely.
   - `config.py` — `Settings`, read from `IDENTITY_SYSTEM_*` env vars
     (`.env.example` has the full list). `Settings.is_trusted_redirect()` is
     the open-redirect guard for `POST /api/login`'s `rd`; `Settings.is_admin()`
-    is the `GET /api/admin/users` allowlist check.
+    is the `GET /api/admin/users` allowlist check. `oidc_issuer_url` is a
+    separate concept from `issuer` — the latter is only sessionkit's TOTP
+    label, don't conflate them.
   - `apps.py` — `load_apps(path)`, reads `apps.json` once at startup. No
     database, no admin UI to manage it yet.
+  - `oidc_clients.py` — `load_oidc_clients(path)`, reads the static OIDC
+    client registry (`oidc_clients.json`) once at startup, same spirit as
+    `apps.py`. `hash_client_secret`/`verify_client_secret` wrap sessionkit's
+    own `Argon2Hasher` — reused, not reimplemented, so client secrets get
+    the same hashing treatment as user passwords.
+  - `oidc.py` — the OAuth2/OIDC router (`create_oidc_router`), the in-memory
+    one-time-use `AuthorizationCodeStore`, and `load_or_create_signing_key`
+    (provisions the RSA signing key on first run, same posture as
+    sessionkit provisioning its own db).
   - `main.py` — the only module that reads env vars, opens a real
-    `SqliteAuthStore`, or reads `apps.json` off disk. `uvicorn identity_system.main:app`
+    `SqliteAuthStore`, or reads `apps.json`/`oidc_clients.json` off disk, and
+    provisions the OIDC signing key file. `uvicorn identity_system.main:app`
     entrypoint.
 - `frontend/` — Vite + React + TypeScript, same toolchain as this fleet's
   other apps (finance-system, invoice-system): React 19, `react-router-dom`,
@@ -40,12 +59,20 @@ endpoint list and proxy wiring examples (nginx `auth_request`, Traefik
   for local dev, same two-process shape as finance-system.
 - `apps.json` (repo root) — the static apps-directory list `GET /api/apps`
   serves verbatim. Add an app = add an entry + redeploy.
+- `oidc_clients.json` (repo root, gitignored — `oidc_clients.json.example`
+  is the committed template) — the static OIDC client registry. Holds
+  credentials (hashed), so unlike `apps.json` it's treated like `.env`:
+  excluded from `deploy.sh`'s rsync, hand-provisioned on the target.
 - `tests/conftest.py` — `store` (in-memory `SqliteAuthStore`), `settings`
   (fixed test `Settings`), `auth` (`AuthService` over both), `apps` (a small
-  fixed list), `client` (`TestClient` — note its `base_url` is
-  `http://sso.example.com`, not the default `testserver`, because the
-  session cookie is scoped to `settings.cookie_domain` and a mismatched host
-  would silently drop it between requests).
+  fixed list), `oidc_signing_key` (ephemeral in-memory RSA key),
+  `oidc_client_secret`/`oidc_clients` (one registered test client; the
+  fixture gives you the plaintext secret since you need it to drive
+  `/api/oidc/token`'s client auth, only its hash goes into the registry),
+  `client` (`TestClient` — note its `base_url` is `http://sso.example.com`,
+  not the default `testserver`, because the session cookie is scoped to
+  `settings.cookie_domain` and a mismatched host would silently drop it
+  between requests).
 - `deploy/` — no Dockerfile; this ships to a Debian/Proxmox LXC container
   like the other apps. `deploy.sh` (run from Jenkins — see `Jenkinsfile`)
   rsyncs the checkout (including the `frontend/dist/` the Jenkinsfile's
@@ -55,10 +82,12 @@ endpoint list and proxy wiring examples (nginx `auth_request`, Traefik
   `nginx-identity-system.conf`. nginx serves `frontend/dist/` directly for
   the frontend's own page routes and proxies everything else to the backend
   (see the nginx config's own comment for why it's proxy-by-default rather
-  than static-by-default). `__BACKEND_DIR__/.env` and `.../data/` are never
-  touched by the rsync, so a hand-provisioned `.env` and the live `auth.db`
-  both survive every deploy — see the `.service` file's header comment for
-  the one-time setup that requires.
+  than static-by-default). `__BACKEND_DIR__/.env`, `.../data/`, and
+  `.../oidc_clients.json` are never touched by the rsync, so a
+  hand-provisioned `.env`/`oidc_clients.json` and the live `auth.db` (plus,
+  by default, the OIDC signing key under `data/`) all survive every deploy
+  — see the `.service` file's header comment for the one-time setup that
+  requires.
 
 ## Commands
 
@@ -111,7 +140,9 @@ npm run dev                                       # terminal 2 - frontend, :5173
   finance-system's already-deployed frontend hardcode these (see
   `finance-system/frontend/src/App.tsx`'s `IDENTITY_SYSTEM_ORIGIN`).
   Anything new goes under `/api/` instead (`/api/login`, `/api/admin/users`,
-  `/api/apps`).
+  `/api/apps`). `GET /.well-known/openid-configuration` is the one
+  deliberate exception — that path is OIDC-spec-fixed, not a choice made
+  here.
 
 ## Gotchas
 
@@ -146,9 +177,24 @@ npm run dev                                       # terminal 2 - frontend, :5173
   editing an app needs a restart. There's no database and no admin UI for
   it yet — deliberately the simplest possible MVP.
 - **Deployed `IDENTITY_SYSTEM_DB` must resolve inside `__BACKEND_DIR__/data/`.**
-  `deploy.sh`'s rsync `--delete` only spares `data/`, `.env`, and `*.db`/
-  `*.db-*` (belt and suspenders) - `.env.example`'s own local-dev default
-  (`./auth.db`, relative to `WorkingDirectory=__BACKEND_DIR__`) resolves
-  *outside* `data/` if it's ever deployed unedited, and gets deleted the
-  next deploy. `remote-setup.sh` checks this and warns loudly; don't remove
-  that check.
+  `deploy.sh`'s rsync `--delete` only spares `data/`, `.env`, `oidc_clients.json`,
+  and `*.db`/`*.db-*` (belt and suspenders) - `.env.example`'s own local-dev
+  default (`./auth.db`, relative to `WorkingDirectory=__BACKEND_DIR__`)
+  resolves *outside* `data/` if it's ever deployed unedited, and gets
+  deleted the next deploy. `remote-setup.sh` checks this and warns loudly;
+  don't remove that check.
+- **Same rule, same check, for `IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH`** —
+  it has no `*.db`-style belt-and-suspenders exclude of its own, so `data/`
+  is the only thing protecting it. Losing it isn't just data loss: a
+  silently-regenerated key rotates every relying party's trust anchor and
+  breaks SSO for all of them until they re-fetch `/api/oidc/jwks.json`.
+- **OIDC authorization codes are in-memory only, by design** (see `oidc.py`'s
+  module docstring) — don't "fix" a restart dropping in-flight codes by
+  reaching for a db table without re-reading that reasoning first; it's a
+  deliberate simplicity/availability tradeoff tied to the single-instance
+  `SqliteAuthStore` posture below, not an oversight.
+- **`/api/oidc/authorize`'s `redirect_uri` check is an exact match against
+  the registry**, not `Settings.is_trusted_redirect()`'s domain-suffix
+  match — don't reuse that helper here. A domain-suffix match would let
+  anyone who can stand up a page anywhere under the cookie domain receive
+  another relying party's authorization code.

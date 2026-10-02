@@ -9,3 +9,6 @@ build/
 *.db
 .env
 reports/
+data/
+oidc_clients.json
+*.pem

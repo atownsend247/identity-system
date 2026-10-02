@@ -7,14 +7,18 @@ production (see ``deploy/nginx-identity-system.conf``) and Vite's dev
 server proxies everything below to this app locally (see
 ``frontend/vite.config.ts``).
 
-``create_app(auth, settings, apps)`` takes an already-constructed
-``AuthService`` (same shape as sessionkit's own ``examples/fastapi_app.py``)
-and the static apps-directory list, so tests can build one over an
-in-memory store with no real files touched.
+``create_app(auth, settings, apps, oidc_clients, oidc_signing_key)`` takes
+an already-constructed ``AuthService`` (same shape as sessionkit's own
+``examples/fastapi_app.py``), the static apps-directory list, and the
+(also static) OIDC client registry + signing key the ``/api/oidc/*`` +
+``/.well-known/openid-configuration`` routes need (see ``oidc.py``) - so
+tests can build one over an in-memory store with no real files touched.
+Passing no signing key leaves the OIDC surface unmounted entirely.
 """
 
 from __future__ import annotations
 
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -30,6 +34,8 @@ from sessionkit import (
 )
 
 from .config import Settings
+from .oidc import create_oidc_router
+from .oidc_clients import OidcClient
 
 # Same shape as sessionkit's own examples/fastapi_app.py: one map from
 # AuthError subclass to status code, checked with isinstance (first match
@@ -48,9 +54,29 @@ _ERROR_STATUS: dict[type[AuthError], int] = {
 }
 
 
-def create_app(auth: AuthService, settings: Settings, apps: list[dict] | None = None) -> FastAPI:
+def create_app(
+    auth: AuthService,
+    settings: Settings,
+    apps: list[dict] | None = None,
+    oidc_clients: dict[str, OidcClient] | None = None,
+    oidc_signing_key: rsa.RSAPrivateKey | None = None,
+) -> FastAPI:
     app = FastAPI(title="identity-system")
     apps = apps or []
+
+    # OIDC is opt-in on whether a signing key was supplied (main.py always
+    # supplies one - see load_or_create_signing_key) - this keeps create_app
+    # usable without ever touching a key file for a caller that doesn't
+    # want the OIDC surface mounted at all.
+    if oidc_signing_key is not None:
+        app.include_router(
+            create_oidc_router(
+                auth=auth,
+                settings=settings,
+                clients=oidc_clients or {},
+                signing_key=oidc_signing_key,
+            )
+        )
 
     async def _handle_auth_error(_request: Request, exc: AuthError) -> JSONResponse:
         status = next((s for t, s in _ERROR_STATUS.items() if isinstance(exc, t)), 400)

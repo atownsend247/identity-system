@@ -23,6 +23,9 @@ class Settings:
     issuer: str
     admin_emails: frozenset[str]
     apps_path: str
+    oidc_issuer_url: str
+    oidc_clients_path: str
+    oidc_signing_key_path: str
 
     cookie_name: str = "identity_session"
 
@@ -40,6 +43,12 @@ class Settings:
                 if email.strip()
             ),
             apps_path=_env("APPS_PATH", "./apps.json"),
+            # Not the same thing as `issuer` above (that's sessionkit's TOTP
+            # label) - this is the OIDC `iss` claim/discovery base URL, and
+            # has to be the real externally-reachable origin, not a name.
+            oidc_issuer_url=_env("OIDC_ISSUER_URL", ""),
+            oidc_clients_path=_env("OIDC_CLIENTS_PATH", "./oidc_clients.json"),
+            oidc_signing_key_path=_env("OIDC_SIGNING_KEY_PATH", "./data/oidc_signing_key.pem"),
         )
 
     def is_admin(self, email: str) -> bool:
