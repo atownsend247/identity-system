@@ -12,10 +12,10 @@
 #
 # .env and data/ are never touched by this rsync's --delete sweep: .env is
 # gitignored so it isn't in this checkout at all, and data/ is where the
-# target's own SQLite file, the OIDC signing key, and (by default -
-# IDENTITY_SYSTEM_OIDC_CLIENTS_PATH) the OIDC client registry are all
-# supposed to live (see remote-setup.sh) - so a real .env and an
-# already-provisioned auth.db/oidc_clients.json/signing key all survive
+# target's own SQLite file and the OIDC signing key are supposed to live (see
+# remote-setup.sh). The apps directory and OIDC client registry live in that
+# same SQLite file (managed from the admin pages), so a real .env and an
+# already-provisioned auth.db/signing key all survive
 # every future deploy, AS LONG AS __BACKEND_DIR__/.env's IDENTITY_SYSTEM_DB
 # and IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH actually point inside data/ (see
 # identity-system-api.service's header comment - remote-setup.sh checks
@@ -24,12 +24,10 @@
 # IDENTITY_SYSTEM_DB is ever pointed somewhere else by mistake: an
 # untracked .db file sitting outside data/ has no exclude rule of its own
 # otherwise, and --delete treats it as garbage to remove.
-# oidc_clients.json has no equivalent wildcard exclude - it's a plain JSON
-# filename (apps.json, right next to it, is deliberately NOT excluded and
-# must sync), so getting it out of data/'s way is what protects it, not a
-# name-based rule here. A missing file isn't fatal either way - it just
-# means no OIDC clients are registered yet (see oidc_clients.py's
-# load_oidc_clients).
+# apps.json and oidc_clients.json are only read once, on first startup, to
+# seed the db (see main.py). Neither is protected by this sweep any more and
+# neither needs to be: after that import the db is the source of truth, and
+# a missing file just means nothing to import.
 #
 # frontend/dist/ (built by the Jenkinsfile's Frontend stage before this
 # script runs) is NOT excluded - it ships as part of the normal whole-repo

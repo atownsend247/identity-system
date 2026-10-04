@@ -4,10 +4,10 @@ sitting alongside (not replacing) the cookie-session/forward-auth system in
 network (Jenkins' OpenID Connect plugin was the first) - not a general-
 purpose multi-tenant IdP:
 
-- No consent screen. Any client registered in ``oidc_clients.json`` is
-  auto-approved for a signed-in user, the same trust posture
-  ``IDENTITY_SYSTEM_ADMIN_EMAILS``/``apps.json`` already take (whoever can
-  edit that file is already trusted).
+- No consent screen. Any client registered in the admin pages' OIDC client
+  registry (see ``registry.py``) is auto-approved for a signed-in user, the
+  same trust posture ``IDENTITY_SYSTEM_ADMIN_EMAILS`` already takes (whoever
+  can manage that registry is already trusted).
 - PKCE is verified when a client uses it, but not required. Every
   registered client here is confidential (it authenticates at
   ``/api/oidc/token`` with a ``client_secret`` regardless), and PKCE exists
@@ -36,6 +36,7 @@ import hashlib
 import json
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote_plus, urlencode
@@ -174,7 +175,7 @@ def create_oidc_router(
     *,
     auth: AuthService,
     settings: Settings,
-    clients: dict[str, OidcClient],
+    lookup_client: Callable[[str], OidcClient | None],
     signing_key: rsa.RSAPrivateKey,
     code_store: AuthorizationCodeStore | None = None,
 ) -> APIRouter:
@@ -222,7 +223,7 @@ def create_oidc_router(
         redirect_uri = params.get("redirect_uri", "")
         state = params.get("state", "")
 
-        client = clients.get(client_id)
+        client = lookup_client(client_id)
         if client is None or redirect_uri not in client.redirect_uris:
             # redirect_uri isn't verified yet - never redirect an
             # unverified URI, that's the whole point of registering them.
@@ -302,7 +303,7 @@ def create_oidc_router(
             except Exception:
                 return JSONResponse(status_code=401, content={"error": "invalid_client"})
 
-        client = clients.get(client_id or "")
+        client = lookup_client(client_id or "")
         if client is None or not client_secret or not verify_client_secret(client, client_secret):
             return JSONResponse(status_code=401, content={"error": "invalid_client"})
 

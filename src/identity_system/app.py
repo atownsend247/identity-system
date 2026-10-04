@@ -1,26 +1,30 @@
 """The identity-system FastAPI app: the JSON API a reverse proxy's
 forward-auth hook, downstream apps, and this service's own Vite/React
 frontend (``frontend/``) all call. There's no server-rendered HTML here -
-``/login``, ``/admin``, ``/`` (apps directory) and ``/account`` are pure
-client-side routes; nginx serves the built frontend for those in
-production (see ``deploy/nginx-identity-system.conf``) and Vite's dev
-server proxies everything below to this app locally (see
-``frontend/vite.config.ts``).
+``/login``, ``/admin``, ``/admin/apps``, ``/admin/oidc-clients``, ``/`` (apps
+directory) and ``/account`` are pure client-side routes; nginx serves the
+built frontend for those in production (see
+``deploy/nginx-identity-system.conf``) and Vite's dev server proxies
+everything below to this app locally (see ``frontend/vite.config.ts``).
 
-``create_app(auth, settings, apps, oidc_clients, oidc_signing_key)`` takes
-an already-constructed ``AuthService`` (same shape as sessionkit's own
-``examples/fastapi_app.py``), the static apps-directory list, and the
-(also static) OIDC client registry + signing key the ``/api/oidc/*`` +
-``/.well-known/openid-configuration`` routes need (see ``oidc.py``) - so
-tests can build one over an in-memory store with no real files touched.
-Passing no signing key leaves the OIDC surface unmounted entirely.
+``create_app(auth, settings, registry, oidc_signing_key)`` takes an
+already-constructed ``AuthService`` (same shape as sessionkit's own
+``examples/fastapi_app.py``), the ``ConfigRegistry`` holding the apps
+directory and OIDC client registry (see ``registry.py``), and the OIDC
+signing key the ``/api/oidc/*`` + ``/.well-known/openid-configuration``
+routes need (see ``oidc.py``) - so tests can build one over an in-memory
+store with no real files touched. Passing no signing key leaves the OIDC
+surface unmounted entirely.
 """
 
 from __future__ import annotations
 
+from typing import Annotated, Literal
+
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel, Field, StringConstraints
 
 from sessionkit import (
     AuthenticationError,
@@ -35,7 +39,32 @@ from sessionkit import (
 
 from .config import Settings
 from .oidc import create_oidc_router
-from .oidc_clients import OidcClient
+from .oidc_clients import OidcClient, generate_client_secret, hash_client_secret
+from .registry import ConfigRegistry
+
+# Same rules the public apps directory and the OIDC redirect_uri exact-match
+# depend on - a plain absolute http(s) URL, no whitespace. Deliberately not
+# pydantic's HttpUrl: that normalises the value (adds a trailing slash to a
+# bare origin), and the redirect_uri check is an exact string match.
+_HttpUrl = Annotated[str, StringConstraints(pattern=r"^https?://\S+$", max_length=2000)]
+_OidcScope = Literal["openid", "email", "profile"]
+
+
+class AppIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    url: _HttpUrl
+    description: str = Field(default="", max_length=1000)
+
+
+class OidcClientIn(BaseModel):
+    client_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._-]{1,200}$")]
+    redirect_uris: list[_HttpUrl] = Field(min_length=1)
+    allowed_scopes: list[_OidcScope] = Field(default_factory=lambda: ["openid"], min_length=1)
+
+
+class OidcClientUpdate(BaseModel):
+    redirect_uris: list[_HttpUrl] = Field(min_length=1)
+    allowed_scopes: list[_OidcScope] = Field(min_length=1)
 
 # Same shape as sessionkit's own examples/fastapi_app.py: one map from
 # AuthError subclass to status code, checked with isinstance (first match
@@ -57,12 +86,10 @@ _ERROR_STATUS: dict[type[AuthError], int] = {
 def create_app(
     auth: AuthService,
     settings: Settings,
-    apps: list[dict] | None = None,
-    oidc_clients: dict[str, OidcClient] | None = None,
+    registry: ConfigRegistry,
     oidc_signing_key: rsa.RSAPrivateKey | None = None,
 ) -> FastAPI:
     app = FastAPI(title="identity-system")
-    apps = apps or []
 
     # OIDC is opt-in on whether a signing key was supplied (main.py always
     # supplies one - see load_or_create_signing_key) - this keeps create_app
@@ -73,7 +100,7 @@ def create_app(
             create_oidc_router(
                 auth=auth,
                 settings=settings,
-                clients=oidc_clients or {},
+                lookup_client=registry.get_oidc_client,
                 signing_key=oidc_signing_key,
             )
         )
@@ -91,6 +118,16 @@ def create_app(
     def current_user(request: Request) -> User:
         # AuthenticationError propagates to the handler above -> 401 JSON
         return auth.user_for_token(_token(request))
+
+    def require_admin(user: User = Depends(current_user)) -> User:
+        # is_admin has no sessionkit exception type of its own (it isn't an
+        # AuthError - it's this service's own bespoke allowlist check), so
+        # it's a plain HTTPException. Unlike the old HTML page, these routes
+        # don't redirect on 401/403 - the frontend's admin pages own that
+        # (see frontend/src/Admin.tsx).
+        if not settings.is_admin(user.email):
+            raise HTTPException(status_code=403, detail="forbidden")
+        return user
 
     def _set_session_cookie(response: Response, token: str) -> None:
         response.set_cookie(
@@ -110,11 +147,23 @@ def create_app(
         )
 
     def _user_json(user: User) -> dict:
+        # is_admin is only here so the frontend can decide which admin pages
+        # to show - every admin route still enforces it server-side.
         return {
             "id": user.id,
             "email": user.email,
             "name": user.name,
             "totp_enabled": user.totp_enabled,
+            "is_admin": settings.is_admin(user.email),
+        }
+
+    def _oidc_client_json(client: OidcClient) -> dict:
+        # Never the hash - and the plaintext secret only ever appears in the
+        # create/rotate responses, once.
+        return {
+            "client_id": client.client_id,
+            "redirect_uris": sorted(client.redirect_uris),
+            "allowed_scopes": sorted(client.allowed_scopes),
         }
 
     # ------------------------------------------------------------- login
@@ -216,15 +265,7 @@ def create_app(
     # --------------------------------------------------------------- admin
 
     @app.get("/api/admin/users")
-    def admin_users(user: User = Depends(current_user)):
-        # Depends(current_user) alone gives the standard 401 via
-        # _ERROR_STATUS; is_admin has no sessionkit exception type of its
-        # own (it isn't an AuthError - it's this service's own bespoke
-        # allowlist check), so it's a plain HTTPException instead. Unlike
-        # the old HTML page, this route doesn't redirect on 401/403 - the
-        # frontend's Admin page owns that (see frontend/src/Admin.tsx).
-        if not settings.is_admin(user.email):
-            raise HTTPException(status_code=403, detail="forbidden")
+    def admin_users(_admin: User = Depends(require_admin)):
         return [
             {
                 "id": u.id,
@@ -243,8 +284,77 @@ def create_app(
     def list_apps():
         # Public, deliberately unauthenticated - the apps directory (this
         # service's own default landing page) is meant to be visible
-        # whether or not the visitor is signed in. See apps.py/apps.json.
-        return apps
+        # whether or not the visitor is signed in. Managed from the admin
+        # page (see the /api/admin/apps routes below).
+        return [
+            {"name": a["name"], "url": a["url"], "description": a["description"]}
+            for a in registry.list_apps()
+        ]
+
+    @app.get("/api/admin/apps")
+    def admin_list_apps(_admin: User = Depends(require_admin)):
+        return registry.list_apps()
+
+    @app.post("/api/admin/apps", status_code=201)
+    def admin_add_app(payload: AppIn, _admin: User = Depends(require_admin)):
+        app_id = registry.add_app(payload.name, payload.url, payload.description)
+        return {"id": app_id, **payload.model_dump()}
+
+    @app.put("/api/admin/apps/{app_id}")
+    def admin_update_app(app_id: int, payload: AppIn, _admin: User = Depends(require_admin)):
+        if not registry.update_app(app_id, payload.name, payload.url, payload.description):
+            raise HTTPException(status_code=404, detail="app not found")
+        return {"id": app_id, **payload.model_dump()}
+
+    @app.delete("/api/admin/apps/{app_id}")
+    def admin_delete_app(app_id: int, _admin: User = Depends(require_admin)):
+        if not registry.delete_app(app_id):
+            raise HTTPException(status_code=404, detail="app not found")
+        return Response(status_code=204)
+
+    # ------------------------------------------------------- oidc clients
+
+    @app.get("/api/admin/oidc-clients")
+    def admin_list_oidc_clients(_admin: User = Depends(require_admin)):
+        return [_oidc_client_json(c) for c in registry.list_oidc_clients()]
+
+    @app.post("/api/admin/oidc-clients", status_code=201)
+    def admin_add_oidc_client(payload: OidcClientIn, _admin: User = Depends(require_admin)):
+        secret = generate_client_secret()
+        client = OidcClient(
+            client_id=payload.client_id,
+            client_secret_hash=hash_client_secret(secret),
+            redirect_uris=frozenset(payload.redirect_uris),
+            allowed_scopes=frozenset(payload.allowed_scopes),
+        )
+        if not registry.add_oidc_client(client):
+            raise HTTPException(status_code=409, detail="client_id already registered")
+        # The one and only time the plaintext secret leaves the server.
+        return {**_oidc_client_json(client), "client_secret": secret}
+
+    @app.put("/api/admin/oidc-clients/{client_id}")
+    def admin_update_oidc_client(
+        client_id: str, payload: OidcClientUpdate, _admin: User = Depends(require_admin)
+    ):
+        updated = registry.update_oidc_client(
+            client_id, frozenset(payload.redirect_uris), frozenset(payload.allowed_scopes)
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="client not found")
+        return _oidc_client_json(registry.get_oidc_client(client_id))
+
+    @app.post("/api/admin/oidc-clients/{client_id}/rotate-secret")
+    def admin_rotate_oidc_client_secret(client_id: str, _admin: User = Depends(require_admin)):
+        secret = generate_client_secret()
+        if not registry.set_oidc_client_secret_hash(client_id, hash_client_secret(secret)):
+            raise HTTPException(status_code=404, detail="client not found")
+        return {"client_id": client_id, "client_secret": secret}
+
+    @app.delete("/api/admin/oidc-clients/{client_id}")
+    def admin_delete_oidc_client(client_id: str, _admin: User = Depends(require_admin)):
+        if not registry.delete_oidc_client(client_id):
+            raise HTTPException(status_code=404, detail="client not found")
+        return Response(status_code=204)
 
     return app
 

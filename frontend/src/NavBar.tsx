@@ -15,7 +15,15 @@ function NavBar({ user, onLogout }: Props) {
       <nav>
         {user ? (
           <>
-            <NavLink to="/admin">Admin</NavLink>{' '}
+            {/* Admin pages are only linked for allowlisted accounts - the
+                pages themselves are still gated server-side. */}
+            {user.is_admin && (
+              <>
+                <NavLink to="/admin">Users</NavLink>{' '}
+                <NavLink to="/admin/apps">Apps directory</NavLink>{' '}
+                <NavLink to="/admin/oidc-clients">OIDC clients</NavLink>{' '}
+              </>
+            )}
             <NavLink to="/account">{user.name}</NavLink>{' '}
             <button type="button" className="btn" onClick={onLogout}>
               Log out

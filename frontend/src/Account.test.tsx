@@ -18,7 +18,13 @@ function renderAccount(user: User | null, onUserUpdated = vi.fn()) {
   }
 }
 
-const demoUser: User = { id: '1', email: 'a@b.com', name: 'A B', totp_enabled: true }
+const demoUser: User = {
+  id: '1',
+  email: 'a@b.com',
+  name: 'A B',
+  totp_enabled: true,
+  is_admin: false,
+}
 
 describe('Account', () => {
   it('redirects to /login?rd=/account when signed out', () => {

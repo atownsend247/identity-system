@@ -15,9 +15,10 @@ built-in OpenID Connect security realm instead. For that handful of cases,
 identity-system is *also* a small OAuth2 Authorization Code + PKCE + OIDC
 provider (`/.well-known/openid-configuration`, `/api/oidc/*`) — see
 [OIDC for other relying parties](#oidc-for-other-relying-parties) below.
-It's a minimal one: a static client registry (no self-service client
-registration) and no consent screen (any registered client is auto-approved
-for a signed-in user — the same trust posture as `apps.json`).
+It's a minimal one: no consent screen (any registered client is auto-approved
+for a signed-in user — the same trust posture as the admin allowlist), and
+clients are registered by an admin on the `/admin/oidc-clients` page rather
+than through open self-service signup.
 
 ## How it fits together
 
@@ -29,7 +30,7 @@ for a signed-in user — the same trust posture as `apps.json`).
           identity-system  (sso.example.com)
              /verify   -> 200 + X-Auth-User-* headers, or 401
              /login    -> the only place a human types a password
-             /         -> the apps directory (see apps.json)
+             /         -> the apps directory (managed at /admin/apps)
              /account  -> a signed-in user's own details
 ```
 
@@ -79,7 +80,9 @@ Then open `http://localhost:5173/`.
 | `POST /2fa/disable` | JSON `{"current_password": ...}`. |
 | `POST /2fa/recovery-codes/regenerate` | JSON `{"current_password": ...}`; returns a fresh set of ten. |
 | `GET /api/admin/users` | every account (id, email, name, created, last login, 2FA) as JSON. Restricted to `IDENTITY_SYSTEM_ADMIN_EMAILS` — `401` with no session, `403` if the session isn't on the allowlist. |
-| `GET /api/apps` | the static apps directory (`apps.json`) as JSON — public, no session required. |
+| `GET /api/apps` | the apps directory as JSON (`name`, `url`, `description`) — public, no session required. |
+| `GET/POST /api/admin/apps`, `PUT/DELETE /api/admin/apps/{id}` | manage the apps directory. Same admin gate as `/api/admin/users`. |
+| `GET/POST /api/admin/oidc-clients`, `PUT/DELETE /api/admin/oidc-clients/{client_id}`, `POST /api/admin/oidc-clients/{client_id}/rotate-secret` | manage OIDC clients. Same admin gate. The plaintext secret is returned only by create and rotate, once. |
 | `GET /.well-known/openid-configuration` | OIDC discovery document. Spec-fixed path — the one exception to everything new living under `/api/`. |
 | `GET /api/oidc/jwks.json` | the public half of the signing key, as a JWK set. |
 | `GET /api/oidc/authorize` | the OAuth2 authorization endpoint. No session → redirects to `/login?rd=...` (same machinery as above); signed in → redirects straight back to the client's `redirect_uri` with a one-time `code` (no consent screen — see above). PKCE (`S256`) is supported and verified if the client sends it, but not required — every registered client is confidential (authenticates at `/api/oidc/token` with its `client_secret` regardless), and PKCE exists to protect clients that can't hold one. |
@@ -153,27 +156,14 @@ wiring up `/verify`:
 https://sso.example.com/.well-known/openid-configuration
 ```
 
-**Registering an OIDC client**: there's no self-service registration
-endpoint (same posture as account provisioning — see
-[Managing accounts](#managing-accounts)). Add an entry to
-`IDENTITY_SYSTEM_OIDC_CLIENTS_PATH` (`./oidc_clients.json` by default — see
-[`oidc_clients.json.example`](oidc_clients.json.example) for the shape) by
-hand:
+**Registering an OIDC client**: sign in as an account on
+`IDENTITY_SYSTEM_ADMIN_EMAILS`, open **OIDC clients** (`/admin/oidc-clients`),
+and register it with its client ID, one redirect URI per line, and the scopes
+it may request. The page generates the client secret and shows it **once** —
+copy it into the relying party straight away. Only a hash is stored, so a
+lost secret means rotating it (the old one stops working immediately). No
+restart needed.
 
-```sh
-python -c "from identity_system.oidc_clients import hash_client_secret; print(hash_client_secret('a-long-random-secret'))"
-```
-
-```json
-{
-  "client_id": "jenkins",
-  "client_secret_hash": "<output from above>",
-  "redirect_uris": ["https://jenkins.example.com/securityRealm/finishLogin"],
-  "allowed_scopes": ["openid", "email", "profile"]
-}
-```
-
-Restart the service (this file isn't live-reloaded, same as `apps.json`).
 `redirect_uris` are matched **exactly** — no domain-suffix matching the way
 `?rd=` gets on `/api/login` — so include the full path the relying party
 actually redirects back to.
@@ -203,15 +193,25 @@ See [`.env.example`](.env.example) — `IDENTITY_SYSTEM_DB`,
 `IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH`.
 
 `IDENTITY_SYSTEM_ADMIN_EMAILS` is a comma-separated, case-insensitive
-allowlist gating `GET /api/admin/users` — empty by default, so nobody can
-reach it until it's set. There's no in-app role management; sessionkit
-itself has no roles/scopes concept (see [Known gaps](#known-gaps-deliberate-not-oversights)),
-so this is the one place identity-system makes its own authorization call.
+allowlist gating the users page, the apps directory admin, and the OIDC client
+admin (and their `/api/admin/*` routes) — empty by default, so nobody can
+reach them until it's set. Non-admins don't see those links at all. There's no
+in-app role management; sessionkit itself has no roles/scopes concept (see
+[Known gaps](#known-gaps-deliberate-not-oversights)), so this is the one place
+identity-system makes its own authorization call.
 
-`IDENTITY_SYSTEM_APPS_PATH` points at the JSON file `GET /api/apps` (and so
-the `/` apps directory) reads once at startup — `./apps.json` by default;
-see [`apps.json`](apps.json) at the repo root for the format. Not
-live-reloaded; add or change an app, then restart.
+**Apps directory and OIDC clients live in the database.** Both are managed
+from the admin pages and take effect immediately — no restart, no redeploy.
+They're stored as sibling tables in the `IDENTITY_SYSTEM_DB` file (same
+`data/` protection as accounts; see `.env.example`).
+
+`IDENTITY_SYSTEM_APPS_PATH` and `IDENTITY_SYSTEM_OIDC_CLIENTS_PATH` are now
+**one-time import sources**. On first startup against a database that has
+never imported them, the service seeds the tables from
+[`apps.json`](apps.json) and `oidc_clients.json` (the latter's hashes are
+carried over as-is). After that they're ignored — editing `apps.json` or
+`oidc_clients.json` does nothing, so make changes in the admin pages. A
+missing file just means nothing to import.
 
 `IDENTITY_SYSTEM_COOKIE_DOMAIN` does double duty: it's the `Domain=` on the
 session cookie (so it's shared across every subdomain of it) **and** the
@@ -275,8 +275,6 @@ ssh root@<DEPLOY_HOST>
   model. Each downstream app still owns its own authorization decisions
   based on the identity headers it's given. (`/api/admin/users` is this
   service's own one exception — see `IDENTITY_SYSTEM_ADMIN_EMAILS` above.)
-- **`apps.json` is a static file, not a database.** No admin UI to add/edit
-  apps yet — deliberately the simplest possible MVP; see `apps.py`.
 - **`POST /password` doesn't itself re-check the current password** —
   sessionkit's `AuthService.set_password` doesn't take one (unlike
   `set_email`/`disable_totp`, which do). The session cookie is the only
@@ -287,16 +285,16 @@ ssh root@<DEPLOY_HOST>
   multi-writer production setup should implement `AuthStore` against
   Postgres instead (structural — see sessionkit's
   `docs/architecture.md#bring-your-own-storage`).
-- **No OIDC consent screen.** Any client in `oidc_clients.json` is
-  auto-approved for a signed-in user — fine for a handful of relying
-  parties you run yourself, not a general-purpose multi-tenant posture.
+- **No OIDC consent screen.** Any registered OIDC client is auto-approved
+  for a signed-in user — fine for a handful of relying parties you run
+  yourself, not a general-purpose multi-tenant posture.
 - **OIDC authorization codes live in memory, not in a database.** One-time
   use, ~60 second lifetime — a restart mid-login just means the user
   retries. Not safe to run multiple instances of this service behind a
   load balancer for that reason (same single-instance caveat as
   `SqliteAuthStore` above).
-- **No OIDC refresh tokens, no self-service client registration.** Add a
-  relying party by hand-editing `oidc_clients.json` (see
+- **No OIDC refresh tokens, no self-service client registration.** Relying
+  parties are registered by an admin (see
   [OIDC for other relying parties](#oidc-for-other-relying-parties)); a
   relying party re-runs the authorization flow in the browser when its
   session lapses rather than silently refreshing in the background.
@@ -310,6 +308,6 @@ cd frontend && npm test      # frontend
 
 Backend tests run entirely against an in-memory `SqliteAuthStore` and an
 ephemeral in-memory signing key via
-`identity_system.app.create_app(auth, settings, apps, oidc_clients, oidc_signing_key)`
+`identity_system.app.create_app(auth, settings, registry, oidc_signing_key)`
 — no real file touched. Frontend tests (vitest + testing-library) mock
 `fetch` per component — see `frontend/src/Login.test.tsx` for the pattern.

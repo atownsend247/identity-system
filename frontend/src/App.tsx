@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import Account from './Account'
 import Admin from './Admin'
+import AdminApps from './AdminApps'
+import AdminOidcClients from './AdminOidcClients'
 import Apps from './Apps'
 import Login from './Login'
 import NavBar from './NavBar'
@@ -44,6 +46,8 @@ function App() {
           <Route path="/" element={<Apps />} />
           <Route path="/login" element={<Login />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/admin/apps" element={<AdminApps />} />
+          <Route path="/admin/oidc-clients" element={<AdminOidcClients />} />
           <Route path="/account" element={<Account user={user} onUserUpdated={setUser} />} />
         </Routes>
       </main>

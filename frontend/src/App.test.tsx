@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
-function mockFetch(loggedIn: boolean) {
+function mockFetch(loggedIn: boolean, isAdmin = false) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string | URL) => {
@@ -13,7 +13,13 @@ function mockFetch(loggedIn: boolean) {
           status: loggedIn ? 200 : 401,
           json: async () =>
             loggedIn
-              ? { id: '1', email: 'test@example.com', name: 'Test', totp_enabled: false }
+              ? {
+                  id: '1',
+                  email: 'test@example.com',
+                  name: 'Test',
+                  totp_enabled: false,
+                  is_admin: isAdmin,
+                }
               : { detail: 'not authenticated' },
         } as Response
       }
@@ -48,5 +54,22 @@ describe('App', () => {
     render(<App />)
     expect(await screen.findByText('Test')).toBeInTheDocument()
     expect(screen.getByText('Log out')).toBeInTheDocument()
+  })
+
+  it('hides the admin links from a signed-in non-admin', async () => {
+    mockFetch(true, false)
+    render(<App />)
+    await screen.findByText('Test')
+    expect(screen.queryByRole('link', { name: 'Apps directory' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'OIDC clients' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
+  })
+
+  it('shows the admin links to an allowlisted admin', async () => {
+    mockFetch(true, true)
+    render(<App />)
+    expect(await screen.findByRole('link', { name: 'Apps directory' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'OIDC clients' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Users' })).toBeInTheDocument()
   })
 })

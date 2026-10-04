@@ -6,12 +6,12 @@ the one place a browser types a password (`/login`). Also a minimal OAuth2
 Authorization Code + PKCE + OIDC provider (`/.well-known/openid-configuration`,
 `/api/oidc/*` — see `oidc.py`) for relying parties that can't sit behind the
 proxy and speak OIDC themselves (Jenkins' bundled plugin was the first) —
-deliberately minimal: a static client registry (`oidc_clients.json`, no
-self-service registration) and no consent screen (any registered client is
-auto-approved, same trust posture as `apps.json`). Also its own small
+deliberately minimal: no self-service registration (clients are registered by
+an admin on `/admin/oidc-clients`) and no consent screen (any registered client
+is auto-approved, same trust posture as the admin allowlist). Also its own small
 user-facing hub: `/` is an apps directory (the default landing page, public
-whether or not you're signed in) and `/account` is where a signed-in user
-sees their own details. See `README.md` for the full endpoint list, proxy
+whether or not you're signed in, managed by admins at `/admin/apps`) and
+`/account` is where a signed-in user sees their own details. See `README.md` for the full endpoint list, proxy
 wiring examples (nginx `auth_request`, Traefik `ForwardAuth`), and OIDC
 client registration.
 
@@ -19,62 +19,80 @@ client registration.
 
 - `src/identity_system/` — a pure JSON API, no server-rendered HTML at all
   (`frontend/` owns every page — see below).
-  - `app.py` — `create_app(auth: AuthService, settings: Settings, apps: list[dict], oidc_clients: dict[str, OidcClient], oidc_signing_key: rsa.RSAPrivateKey) -> FastAPI`.
+  - `app.py` — `create_app(auth: AuthService, settings: Settings, registry: ConfigRegistry, oidc_signing_key: rsa.RSAPrivateKey) -> FastAPI`.
     All routes live here. Takes an already-built `AuthService` (same shape as
-    sessionkit's own `examples/fastapi_app.py`), the static apps list, and
-    the (also static) OIDC client registry + signing key, so tests never
-    touch a real file. `oidc_signing_key=None` leaves the OIDC routes
-    unmounted entirely.
+    sessionkit's own `examples/fastapi_app.py`), the `ConfigRegistry` (apps
+    directory + OIDC clients), and the signing key, so tests never touch a
+    real file. `oidc_signing_key=None` leaves the OIDC routes unmounted
+    entirely. Admin routes all go through `require_admin` (the
+    `IDENTITY_SYSTEM_ADMIN_EMAILS` check).
   - `config.py` — `Settings`, read from `IDENTITY_SYSTEM_*` env vars
     (`.env.example` has the full list). `Settings.is_trusted_redirect()` is
     the open-redirect guard for `POST /api/login`'s `rd`; `Settings.is_admin()`
     is the `GET /api/admin/users` allowlist check. `oidc_issuer_url` is a
     separate concept from `issuer` — the latter is only sessionkit's TOTP
     label, don't conflate them.
-  - `apps.py` — `load_apps(path)`, reads `apps.json` once at startup. No
-    database, no admin UI to manage it yet.
-  - `oidc_clients.py` — `load_oidc_clients(path)`, reads the static OIDC
-    client registry (`oidc_clients.json`) once at startup, same spirit as
-    `apps.py`. `hash_client_secret`/`verify_client_secret` wrap sessionkit's
-    own `Argon2Hasher` — reused, not reimplemented, so client secrets get
-    the same hashing treatment as user passwords.
-  - `oidc.py` — the OAuth2/OIDC router (`create_oidc_router`), the in-memory
+  - `registry.py` — `ConfigRegistry`, the SQLite-backed apps directory and
+    OIDC client registry. Sibling tables (`apps`, `oidc_clients`,
+    `identity_meta`) in the same db file as sessionkit's, on their own
+    connection — so they sit under the same `data/` protection as accounts.
+    Managed from the admin pages; the one-shot `import_legacy` seeds it from
+    the old files on first startup, flagged in `identity_meta`.
+  - `apps.py` — `load_apps(path)`, reads the legacy `apps.json`. Only used by
+    the one-time import now.
+  - `oidc_clients.py` — `OidcClient`, plus `load_oidc_clients(path)` (legacy
+    import only), `generate_client_secret`, and `hash_client_secret`/
+    `verify_client_secret`, which wrap sessionkit's own `Argon2Hasher` —
+    reused, not reimplemented, so client secrets get the same hashing
+    treatment as user passwords. A generated secret is returned once and
+    never stored in plaintext.
+  - `oidc.py` — the OAuth2/OIDC router (`create_oidc_router`, which takes a
+    `lookup_client` callable so a client registered in the admin page works
+    without a restart), the in-memory
     one-time-use `AuthorizationCodeStore`, and `load_or_create_signing_key`
     (provisions the RSA signing key on first run, same posture as
     sessionkit provisioning its own db).
   - `main.py` — the only module that reads env vars, opens a real
-    `SqliteAuthStore`, or reads `apps.json`/`oidc_clients.json` off disk, and
-    provisions the OIDC signing key file. `uvicorn identity_system.main:app`
-    entrypoint.
+    `SqliteAuthStore` (and the registry's connection to the same file), reads
+    the legacy `apps.json`/`oidc_clients.json` off disk for the one-time
+    import, and provisions the OIDC signing key file. `uvicorn
+    identity_system.main:app` entrypoint.
 - `frontend/` — Vite + React + TypeScript, same toolchain as this fleet's
   other apps (finance-system, invoice-system): React 19, `react-router-dom`,
   oxlint, vitest + testing-library. `frontend/.node-version` pins 22.17.0.
   `src/App.tsx` is the shell (fetches `GET /me` once, tolerating a 401 -
   unlike a downstream app's own frontend, this one must render `/` whether
   or not the visitor is signed in) with one component per page: `Apps.tsx`
-  (`/`), `Login.tsx` (`/login`), `Admin.tsx` (`/admin`), `Account.tsx`
-  (`/account`). `src/api.ts` is the one shared fetch wrapper. `npm run dev`
+  (`/`), `Login.tsx` (`/login`), `Account.tsx` (`/account`), and the
+  admin-only pages `Admin.tsx` (`/admin`, users), `AdminApps.tsx`
+  (`/admin/apps`) and `AdminOidcClients.tsx` (`/admin/oidc-clients`). The
+  admin nav links only render when `GET /me` reports `is_admin`; the pages
+  themselves still rely on the API's 401/403 (`useAdminList.ts`). `src/api.ts`
+  is the one shared fetch wrapper. `npm run dev`
   proxies everything the backend still owns to `:8000` (see
   `vite.config.ts`) - run that alongside `uvicorn identity_system.main:app --reload`
   for local dev, same two-process shape as finance-system.
-- `apps.json` (repo root) — the static apps-directory list `GET /api/apps`
-  serves verbatim. Add an app = add an entry + redeploy.
-- `oidc_clients.json` (repo root, gitignored — `oidc_clients.json.example`
-  is the committed template) — the static OIDC client registry. Holds
-  credentials (hashed), so unlike `apps.json` it's treated like `.env`:
-  excluded from `deploy.sh`'s rsync, hand-provisioned on the target.
-- `tests/conftest.py` — `store` (in-memory `SqliteAuthStore`), `settings`
-  (fixed test `Settings`), `auth` (`AuthService` over both), `apps` (a small
-  fixed list), `oidc_signing_key` (ephemeral in-memory RSA key),
-  `oidc_client_secret`/`oidc_clients` (one registered test client; the
-  fixture gives you the plaintext secret since you need it to drive
-  `/api/oidc/token`'s client auth, only its hash goes into the registry),
+- `apps.json` (repo root) — the legacy apps-directory seed. Imported into the
+  db exactly once, on first startup; after that the apps directory is managed
+  at `/admin/apps`. Editing this file does nothing on a live box.
+- `oidc_clients.json` (gitignored — `oidc_clients.json.example` is the
+  committed template) — the legacy OIDC client seed, same one-time import.
+  Hashes carry over as-is. Nothing reads it after the import.
+- `tests/conftest.py` — `db` (in-memory sqlite connection), `store`
+  (`SqliteAuthStore` over it), `registry` (`ConfigRegistry` over the same
+  connection, as main.py shares one file), `settings` (fixed test `Settings`),
+  `auth` (`AuthService` over `store`), `apps` and `oidc_clients` (these seed
+  the registry with a small app and one test client; `oidc_clients` returns
+  the registered client, and the fixture gives you the plaintext secret since
+  you need it to drive `/api/oidc/token`'s client auth — only its hash is
+  stored), `oidc_signing_key` (ephemeral in-memory RSA key),
   `client` (`TestClient` — note its `base_url` is `http://sso.example.com`,
   not the default `testserver`, because the session cookie is scoped to
   `settings.cookie_domain` and a mismatched host would silently drop it
   between requests).
 - `deploy/` — no Dockerfile; this ships to a Debian/Proxmox LXC container
-  like the other apps. `deploy.sh` (run from Jenkins — see `Jenkinsfile`)
+  like the other apps. New frontend page routes need a matching `location =`
+  in `nginx-identity-system.conf`, or a refresh 404s. `deploy.sh` (run from Jenkins — see `Jenkinsfile`)
   rsyncs the checkout (including the `frontend/dist/` the Jenkinsfile's
   Frontend stage builds first) to the container and runs `remote-setup.sh`
   there over SSH, which builds/refreshes a plain venv (`pip install .` — no
@@ -83,11 +101,11 @@ client registration.
   the frontend's own page routes and proxies everything else to the backend
   (see the nginx config's own comment for why it's proxy-by-default rather
   than static-by-default). `__BACKEND_DIR__/.env`, `.../data/`, and
-  `.../oidc_clients.json` are never touched by the rsync, so a
-  hand-provisioned `.env`/`oidc_clients.json` and the live `auth.db` (plus,
-  by default, the OIDC signing key under `data/`) all survive every deploy
-  — see the `.service` file's header comment for the one-time setup that
-  requires.
+  `*.db` are never touched by the rsync, so a hand-provisioned `.env` and the
+  live `auth.db` (which now also holds the apps directory and the OIDC client
+  registry, plus, by default, the OIDC signing key under `data/`) all survive
+  every deploy — see the `.service` file's header comment for the one-time
+  setup that requires.
 
 ## Commands
 
@@ -173,16 +191,23 @@ npm run dev                                       # terminal 2 - frontend, :5173
   answer.** Fine for one instance; a real multi-writer deployment should
   implement `AuthStore` against Postgres instead (structural change only —
   see sessionkit's `docs/architecture.md#bring-your-own-storage`).
-- **`apps.json` is read once at startup, not live-reloaded.** Adding or
-  editing an app needs a restart. There's no database and no admin UI for
-  it yet — deliberately the simplest possible MVP.
+- **The apps directory and OIDC client registry are edited in the db, not
+  in files.** `apps.json`/`oidc_clients.json` are only imported on first
+  startup (see `main.py`, `identity_meta`'s `legacy_import_done` flag). Don't
+  "fix" a deploy that appears to ignore a change to those files by re-running
+  the import — the admin pages are the source of truth now, and a re-import
+  would duplicate rows.
 - **Deployed `IDENTITY_SYSTEM_DB` must resolve inside `__BACKEND_DIR__/data/`.**
-  `deploy.sh`'s rsync `--delete` only spares `data/`, `.env`, `oidc_clients.json`,
-  and `*.db`/`*.db-*` (belt and suspenders) - `.env.example`'s own local-dev
+  `deploy.sh`'s rsync `--delete` only spares `data/`, `.env`, and
+  `*.db`/`*.db-*` (belt and suspenders) - `.env.example`'s own local-dev
   default (`./auth.db`, relative to `WorkingDirectory=__BACKEND_DIR__`)
   resolves *outside* `data/` if it's ever deployed unedited, and gets
   deleted the next deploy. `remote-setup.sh` checks this and warns loudly;
   don't remove that check.
+- **The admin-managed OIDC client registry is hashes in `auth.db`.** Losing
+  that db loses every registered client's credentials, same as losing the
+  accounts — so the same `data/` rule applies, and a client secret that's
+  lost can only be rotated, never read back.
 - **Same rule, same check, for `IDENTITY_SYSTEM_OIDC_SIGNING_KEY_PATH`** —
   it has no `*.db`-style belt-and-suspenders exclude of its own, so `data/`
   is the only thing protecting it. Losing it isn't just data loss: a

@@ -54,7 +54,8 @@ class Settings:
     def is_admin(self, email: str) -> bool:
         """True if ``email`` is on the static IDENTITY_SYSTEM_ADMIN_EMAILS
         allowlist - the only notion of authorization this service has, since
-        sessionkit itself has no roles/scopes concept."""
+        sessionkit itself has no roles/scopes concept. Gates the apps and
+        OIDC client admin pages too."""
         return email.strip().lower() in self.admin_emails
 
     def is_trusted_redirect(self, target: str) -> bool:

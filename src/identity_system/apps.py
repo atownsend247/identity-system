@@ -1,6 +1,6 @@
-"""Static apps-directory config, read once at startup (same spirit as
-``.env`` - see ``main.py``). No database, no admin UI to manage it yet -
-add an app by editing ``apps.json`` and redeploying."""
+"""Reads the legacy ``apps.json`` file. The apps directory itself now lives
+in SQLite and is managed from the admin page (see ``registry.py``); this
+loader only runs once, for the first-startup import (see ``main.py``)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,8 @@ from pathlib import Path
 
 
 def load_apps(path: str) -> list[dict]:
-    """Each entry is ``{"name", "url", "description"}``. A missing file
-    (e.g. a fresh checkout with no ``apps.json`` configured yet) is not an
-    error - the apps directory just renders empty."""
+    """Each entry is ``{"name", "url", "description"}``. A missing file just
+    means there's nothing to import."""
     try:
         text = Path(path).read_text()
     except FileNotFoundError:

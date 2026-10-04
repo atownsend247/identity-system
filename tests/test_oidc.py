@@ -240,7 +240,7 @@ def test_userinfo_requires_bearer_scheme(client):
     assert resp.status_code == 401
 
 
-def test_token_accepts_http_basic_auth_with_percent_encoded_secret(auth, settings, apps, oidc_signing_key):
+def test_token_accepts_http_basic_auth_with_percent_encoded_secret(auth, settings, registry, oidc_signing_key):
     # RFC 6749 Appendix B: Basic-auth credentials are
     # application/x-www-form-urlencoded before being base64-encoded. A
     # secret containing characters like +, /, = (as almost any
@@ -254,7 +254,8 @@ def test_token_accepts_http_basic_auth_with_percent_encoded_secret(auth, setting
         redirect_uris=frozenset({REDIRECT_URI}),
         allowed_scopes=frozenset({"openid"}),
     )
-    app = create_app(auth, settings, apps, {"jenkins": registered_client}, oidc_signing_key)
+    registry.add_oidc_client(registered_client)
+    app = create_app(auth, settings, registry, oidc_signing_key)
     http_client = TestClient(app, base_url="http://sso.example.com")
     _login(http_client, auth)
 
