@@ -64,7 +64,7 @@ function Login() {
           value={otp}
           onChange={(e) => setOtp(e.target.value)}
         />
-        <button type="submit" className="btn" disabled={submitting}>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
           Sign in
         </button>
       </form>

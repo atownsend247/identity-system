@@ -176,7 +176,7 @@ function AdminOidcClients() {
                   <button type="button" className="btn" onClick={() => handleRotate(client)}>
                     Rotate secret
                   </button>{' '}
-                  <button type="button" className="btn" onClick={() => handleDelete(client)}>
+                  <button type="button" className="btn btn-danger" onClick={() => handleDelete(client)}>
                     Delete
                   </button>
                 </td>
@@ -220,7 +220,7 @@ function AdminOidcClients() {
           ))}
         </fieldset>
         <p>
-          <button type="submit" className="btn" disabled={form.allowed_scopes.length === 0}>
+          <button type="submit" className="btn btn-primary" disabled={form.allowed_scopes.length === 0}>
             {editing ? 'Save changes' : 'Register client'}
           </button>{' '}
           {editing && (

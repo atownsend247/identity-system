@@ -94,7 +94,7 @@ function AdminApps() {
                   <button type="button" className="btn" onClick={() => startEdit(app)}>
                     Edit
                   </button>{' '}
-                  <button type="button" className="btn" onClick={() => handleDelete(app)}>
+                  <button type="button" className="btn btn-danger" onClick={() => handleDelete(app)}>
                     Delete
                   </button>
                 </td>
@@ -132,7 +132,7 @@ function AdminApps() {
           onChange={(e) => setForm({ ...form, description: e.target.value })}
         />
         <p>
-          <button type="submit" className="btn">
+          <button type="submit" className="btn btn-primary">
             {editing ? 'Save changes' : 'Add app'}
           </button>{' '}
           {editing && (

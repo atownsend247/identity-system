@@ -1,112 +1,488 @@
+/* Design tokens. Light is the default; dark follows the OS setting unless
+   the page is pinned to light explicitly. */
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1c1f24;
+  --muted: #5f6672;
+  --border: #dde1e7;
+  --accent: #2456d6;
+  --accent-text: #ffffff;
+  --accent-hover: #1d48b5;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  --warn-bg: #fff8e1;
+  --warn-border: #d9a400;
+  --focus: rgba(36, 86, 214, 0.35);
+  --radius: 0.6rem;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0f1216;
+    --surface: #171b21;
+    --text: #e6e9ef;
+    --muted: #9aa3b2;
+    --border: #2a303a;
+    --accent: #6e93f7;
+    --accent-text: #0f1216;
+    --accent-hover: #8fa9f9;
+    --danger: #f2b8b5;
+    --danger-bg: #3a1716;
+    --warn-bg: #2e2612;
+    --warn-border: #c9a227;
+    --focus: rgba(110, 147, 247, 0.4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0f1216;
+  --surface: #171b21;
+  --text: #e6e9ef;
+  --muted: #9aa3b2;
+  --border: #2a303a;
+  --accent: #6e93f7;
+  --accent-text: #0f1216;
+  --accent-hover: #8fa9f9;
+  --danger: #f2b8b5;
+  --danger-bg: #3a1716;
+  --warn-bg: #2e2612;
+  --warn-border: #c9a227;
+  --focus: rgba(110, 147, 247, 0.4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 1.6rem;
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: 1.15rem;
+  margin: 2rem 0 0.5rem;
+}
+
+p {
+  margin: 0.5rem 0;
 }
 
 a {
-  color: inherit;
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 
+a:hover {
+  color: var(--accent-hover);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  padding: 0.05rem 0.35rem;
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------- header */
+
 .app-header {
-  border-bottom: 1px solid #ddd;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   padding: 0.75rem 1.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
+
+.app-header > a {
+  color: var(--text);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-header > a strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+/* A small mark in front of the wordmark, so the header isn't just text. */
+.app-header > a::before {
+  content: '';
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 0.25rem;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+}
+
+.app-header nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.app-header nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.4rem;
+  font-size: 0.95rem;
+}
+
+.app-header nav a:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.app-header nav a.active {
+  color: var(--accent);
+  background: var(--bg);
+}
+
+/* ------------------------------------------------------------------ main */
 
 .app-main {
-  max-width: 48rem;
-  margin: 2rem auto;
-  padding: 0 1.5rem;
+  max-width: 52rem;
+  margin: 2.25rem auto 4rem;
+  padding: 0 1.25rem;
 }
+
+/* Keep phone widths tidy: the header wraps, tables scroll inside themselves. */
+@media (max-width: 40rem) {
+  .app-header {
+    padding: 0.6rem 1rem;
+  }
+
+  .app-main {
+    margin-top: 1.25rem;
+    padding: 0 1rem;
+  }
+}
+
+/* --------------------------------------------------------------- buttons */
 
 .btn {
-  padding: 0.5rem 0.9rem;
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.95rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
   cursor: pointer;
+  box-shadow: var(--shadow);
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
 }
 
-.error {
-  color: #b00020;
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
 }
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Primary action on a form: the one thing the user is here to do. */
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-text);
+}
+
+.btn-danger {
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* Compact variant for buttons sitting inside table rows. */
+table .btn {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------ messages */
+
+.error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.95rem;
+}
+
+.secret-banner {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  padding: 0.9rem 1.1rem;
+  margin: 1.25rem 0;
+  word-break: break-all;
+}
+
+.secret-banner p {
+  margin: 0.35rem 0;
+}
+
+.secret-banner .btn {
+  margin-top: 0.4rem;
+}
+
+/* -------------------------------------------------------------- apps grid */
 
 .apps-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
   margin-top: 1.5rem;
 }
 
 .app-card {
   display: block;
-  border: 1px solid #ddd;
-  border-radius: 0.5rem;
-  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.15rem;
   text-decoration: none;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  transition:
+    transform 0.15s,
+    border-color 0.15s;
 }
+
+.app-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+
+.app-card strong {
+  display: block;
+  font-size: 1.05rem;
+  margin-bottom: 0.25rem;
+}
+
+.app-card p {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0;
+}
+
+/* ----------------------------------------------------------- panels/forms */
+
+/* Each form reads as a card of its own, the way a settings section does. */
+form {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.35rem;
+  box-shadow: var(--shadow);
+  max-width: 36rem;
+}
+
+form p {
+  margin: 1rem 0 0;
+}
+
+form > .btn {
+  margin-top: 1.1rem;
+}
+
+label {
+  display: block;
+  margin-top: 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+label:first-child {
+  margin-top: 0;
+}
+
+input,
+textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+input:disabled {
+  opacity: 0.6;
+}
+
+input[type='checkbox'] {
+  display: inline-block;
+  width: auto;
+  margin: 0 0.4rem 0 0;
+  accent-color: var(--accent);
+}
+
+textarea {
+  resize: vertical;
+}
+
+fieldset {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+}
+
+legend {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 0 0.3rem;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text);
+  font-weight: 400;
+  margin: 0.25rem 1.1rem 0.25rem 0;
+}
+
+/* ------------------------------------------------------------- tables */
 
 table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: table;
+}
+
+/* Wrap a wide table in a scroller on phones rather than pushing the page sideways. */
+@media (max-width: 40rem) {
+  table {
+    display: block;
+    overflow-x: auto;
+  }
 }
 
 th,
 td {
   text-align: left;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #ddd;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
 }
 
 th {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   text-transform: uppercase;
-  color: #666;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--bg);
 }
 
-form {
-  max-width: 22rem;
+td {
+  font-size: 0.95rem;
 }
 
-label {
-  display: block;
-  margin-top: 0.75rem;
+/* ------------------------------------------------------------ account dl */
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--shadow);
+  margin: 1rem 0 0;
+}
+
+dt {
+  color: var(--muted);
   font-size: 0.9rem;
 }
 
-.checkbox-label {
-  display: inline-block;
-  margin-right: 1rem;
-}
-
-fieldset {
-  margin-top: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 0.5rem;
-}
-
-textarea {
-  width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-}
-
-.secret-banner {
-  border: 1px solid #b08800;
-  border-radius: 0.5rem;
-  padding: 0.75rem 1rem;
-  margin-top: 1rem;
-  word-break: break-all;
-}
-
-input {
-  width: 100%;
-  padding: 0.5rem;
-  font-size: 1rem;
-  box-sizing: border-box;
+dd {
+  margin: 0;
+  font-weight: 500;
 }

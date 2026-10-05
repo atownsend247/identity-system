@@ -71,7 +71,7 @@ function Account({ user, onUserUpdated }: Props) {
       <form onSubmit={handleNameSubmit}>
         <label htmlFor="name">Name</label>
         <input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <button type="submit" className="btn" disabled={nameStatus === 'saving'}>
+        <button type="submit" className="btn btn-primary" disabled={nameStatus === 'saving'}>
           Save
         </button>
         {nameError && <p className="error">{nameError}</p>}
@@ -98,7 +98,7 @@ function Account({ user, onUserUpdated }: Props) {
           onChange={(e) => setCurrentPassword(e.target.value)}
           required
         />
-        <button type="submit" className="btn" disabled={emailStatus === 'saving'}>
+        <button type="submit" className="btn btn-primary" disabled={emailStatus === 'saving'}>
           Save
         </button>
         {emailError && <p className="error">{emailError}</p>}
