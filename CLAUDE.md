@@ -170,11 +170,15 @@ npm run dev                                       # terminal 2 - frontend, :5173
   proof of identity this route requires. Don't assume otherwise; if stronger
   reverification is needed, it has to be added to sessionkit first (there's
   no private hook to reach into from here).
-- **No self-registration endpoint, deliberately.** Accounts are provisioned
-  with sessionkit's bundled CLI against the same db file
-  (`sessionkit --db <path> add ...` — note `--db` is a *top-level* arg,
-  it goes before the subcommand, not after). `AuthService.create_user`
-  already does the work if self-service signup is wanted later.
+- **No self-registration endpoint, deliberately.** There's no public signup
+  form. Accounts are provisioned either by an admin from `/admin`'s "Add a
+  user" form (`POST /api/admin/users`, gated by `require_admin`) or with
+  sessionkit's bundled CLI against the same db file (`sessionkit --db <path>
+  add ...` — note `--db` is a *top-level* arg, it goes before the
+  subcommand, not after). Both call the same `AuthService.create_user` —
+  the CLI is still the only way to rename, re-email, delete, or
+  2fa-disable an existing account; there's no admin-page equivalent for
+  those yet.
 - **No CSRF token on `/api/login`.** `SameSite=Lax` on the session cookie
   covers the common cross-site case but isn't a complete answer —
   documented gap, not an oversight (same posture sessionkit itself takes

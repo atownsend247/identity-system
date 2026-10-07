@@ -80,6 +80,7 @@ Then open `http://localhost:5173/`.
 | `POST /2fa/disable` | JSON `{"current_password": ...}`. |
 | `POST /2fa/recovery-codes/regenerate` | JSON `{"current_password": ...}`; returns a fresh set of ten. |
 | `GET /api/admin/users` | every account (id, email, name, created, last login, 2FA) as JSON. Restricted to `IDENTITY_SYSTEM_ADMIN_EMAILS` — `401` with no session, `403` if the session isn't on the allowlist. |
+| `POST /api/admin/users` | create an account — JSON `{"email", "password", "name"?}`. Same admin gate. The admin sets the initial password directly (no generated-secret flow, unlike OIDC clients — it's a login credential, not something only a machine needs). |
 | `GET /api/apps` | the apps directory as JSON (`name`, `url`, `description`) — public, no session required. |
 | `GET/POST /api/admin/apps`, `PUT/DELETE /api/admin/apps/{id}` | manage the apps directory. Same admin gate as `/api/admin/users`. |
 | `GET/POST /api/admin/oidc-clients`, `PUT/DELETE /api/admin/oidc-clients/{client_id}`, `POST /api/admin/oidc-clients/{client_id}/rotate-secret` | manage OIDC clients. Same admin gate. The plaintext secret is returned only by create and rotate, once. |
@@ -221,11 +222,22 @@ parameter being used for an open redirect.
 ## Managing accounts
 
 There's no self-registration endpoint (see [Known gaps](#known-gaps-deliberate-not-oversights)
-below) — every account is created with sessionkit's own CLI, installed as
-the `sessionkit` console script alongside this package. It operates
-directly on the SQLite file this service opens, so `--db` — a **top-level**
-flag, it goes *before* the subcommand, not after — always has to point at
-whatever `IDENTITY_SYSTEM_DB` resolves to.
+below) — nobody can create their own account by visiting this service. An
+admin (someone on `IDENTITY_SYSTEM_ADMIN_EMAILS`) can create one for them
+from the **Users** page (`/admin`): email, optional display name, and the
+initial password, which the admin sets and hands to the new user directly
+(there's no "reset on first login" flow yet, and no self-service password
+change in the frontend either — see `Account.tsx`). The same validation
+`sessionkit add` enforces (email format, password length) applies here too,
+via `AuthService.create_user`.
+
+Everything else about an account — renaming, changing its email, resetting
+its password, deleting it, turning off a lost authenticator's TOTP — is
+still sessionkit's own CLI, installed as the `sessionkit` console script
+alongside this package. It operates directly on the SQLite file this
+service opens, so `--db` — a **top-level** flag, it goes *before* the
+subcommand, not after — always has to point at whatever `IDENTITY_SYSTEM_DB`
+resolves to.
 
 ```sh
 sessionkit --db ./auth.db add newperson@example.com --name "New Person"
@@ -264,9 +276,11 @@ ssh root@<DEPLOY_HOST>
 
 ## Known gaps (deliberate, not oversights)
 
-- **No self-registration endpoint.** Provision accounts with sessionkit's
-  own CLI — see [Managing accounts](#managing-accounts) above. Easy to add
-  later (`AuthService.create_user` already does the work) if you want it.
+- **No self-registration endpoint.** Nobody can create their own account;
+  an admin creates one for them from `/admin` (see
+  [Managing accounts](#managing-accounts) above), or falls back to
+  sessionkit's own CLI. Either way it's `AuthService.create_user` doing the
+  work — there's still no public signup form, by design.
 - **No CSRF token on `POST /api/login`.** `SameSite=Lax` covers the common
   cross-site case but isn't a complete answer. Same posture sessionkit
   itself takes with rate-limiting: an explicit, documented gap.

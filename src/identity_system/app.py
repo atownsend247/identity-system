@@ -264,19 +264,30 @@ def create_app(
 
     # --------------------------------------------------------------- admin
 
+    def _admin_user_json(u: User) -> dict:
+        return {
+            "id": u.id,
+            "email": u.email,
+            "name": u.name,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            "totp_enabled": u.totp_enabled,
+        }
+
     @app.get("/api/admin/users")
     def admin_users(_admin: User = Depends(require_admin)):
-        return [
-            {
-                "id": u.id,
-                "email": u.email,
-                "name": u.name,
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-                "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
-                "totp_enabled": u.totp_enabled,
-            }
-            for u in auth.list_users()
-        ]
+        return [_admin_user_json(u) for u in auth.list_users()]
+
+    @app.post("/api/admin/users", status_code=201)
+    def admin_create_user(payload: dict, _admin: User = Depends(require_admin)):
+        # Email format and password-strength rules live in AuthService
+        # (DuplicateUser -> 409, ValidationError -> 422 via _ERROR_STATUS),
+        # same as every other sessionkit-backed route here - this is the one
+        # place besides the CLI (`sessionkit add`) that calls create_user.
+        user = auth.create_user(
+            payload.get("email", ""), payload.get("password", ""), name=payload.get("name") or None
+        )
+        return _admin_user_json(user)
 
     # ---------------------------------------------------------------- apps
 
