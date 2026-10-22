@@ -141,7 +141,7 @@ pipeline {
                     ]) {
                         sh '''
                             run_blog() {
-                                uvx --from git+https://github.com/atownsend247/ghost-blog-sync.git@v0.1.0 blog-sync "$@"
+                                uvx --from git+https://github.com/atownsend247/ghost-blog-sync.git@v0.2.0 blog-sync "$@"
                             }
                             run_blog --apply
                             run_blog --schedule --apply
