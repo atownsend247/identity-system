@@ -121,6 +121,35 @@ pipeline {
                 sh 'chmod +x deploy/deploy.sh && ./deploy/deploy.sh'
             }
         }
+
+        // Syncs blog/*.md to Ghost after the deploy, so a blog problem can
+        // never hold up shipping the app (catchError marks the build
+        // UNSTABLE instead of failing it). Sync must precede --schedule:
+        // scheduling skips posts that aren't on Ghost yet. See
+        // https://github.com/atownsend247/ghost-blog-sync (docs/jenkins.md).
+        // Needs the global Secret text credentials `ghost-url` and
+        // `ghost-admin-key`; uvx comes from the Install uv stage above.
+        stage('Sync blog') {
+            when {
+                branch 'main'
+            }
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    withCredentials([
+                        string(credentialsId: 'ghost-url', variable: 'GHOST_URL'),
+                        string(credentialsId: 'ghost-admin-key', variable: 'GHOST_ADMIN_KEY'),
+                    ]) {
+                        sh '''
+                            run_blog() {
+                                uvx --from git+https://github.com/atownsend247/ghost-blog-sync.git@v0.1.0 blog-sync "$@"
+                            }
+                            run_blog --apply
+                            run_blog --schedule --apply
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     post {
