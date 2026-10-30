@@ -4,10 +4,12 @@
 
 export class ApiError extends Error {
   status: number
+  body: Record<string, unknown>
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body: Record<string, unknown> = {}) {
     super(message)
     this.status = status
+    this.body = body
   }
 }
 
@@ -19,13 +21,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     let detail = res.statusText
+    let errBody: Record<string, unknown> = {}
     try {
       const body = await res.json()
       if (body?.detail) detail = body.detail
+      if (body && typeof body === 'object') errBody = body
     } catch {
       // no JSON body - keep the status text
     }
-    throw new ApiError(res.status, detail)
+    throw new ApiError(res.status, detail, errBody)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T

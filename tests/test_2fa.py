@@ -29,6 +29,17 @@ def test_setup_confirm_then_login_requires_otp(client, auth):
     )
     assert resp.status_code == 401
     assert "6-digit code" in resp.json()["detail"]
+    assert resp.json()["otp_required"] is True
+    assert "identity_session" not in resp.cookies
+
+    # a wrong code is a 422 and is not flagged otp_required
+    bad = client.post(
+        "/api/login",
+        json={"email": "alex@example.com", "password": "password123", "otp": "000000"},
+    )
+    assert bad.status_code == 422
+    assert "otp_required" not in bad.json()
+    assert "identity_session" not in bad.cookies
 
     # a fresh code works
     good = client.post(

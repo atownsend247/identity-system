@@ -24,6 +24,7 @@ def test_login_wrong_password_returns_401_json(client, auth):
     )
     assert resp.status_code == 401
     assert "incorrect email or password" in resp.json()["detail"]
+    assert "otp_required" not in resp.json()
     assert "identity_session" not in resp.cookies
 
 

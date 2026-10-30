@@ -32,6 +32,7 @@ from sessionkit import (
     AuthService,
     DuplicateUser,
     OtpInvalid,
+    OtpRequired,
     User,
     UserNotFound,
     ValidationError,
@@ -170,11 +171,19 @@ def create_app(
 
     @app.post("/api/login")
     def api_login(payload: dict):
-        result = auth.login(
-            payload.get("email", ""),
-            payload.get("password", ""),
-            otp=payload.get("otp") or None,
-        )
+        try:
+            result = auth.login(
+                payload.get("email", ""),
+                payload.get("password", ""),
+                otp=payload.get("otp") or None,
+            )
+        except OtpRequired as exc:
+            # The password was right but this account has 2FA on: no session
+            # was created. The flag lets the login wizard move to its code
+            # step without matching on the message text.
+            return JSONResponse(
+                status_code=401, content={"detail": str(exc), "otp_required": True}
+            )
         # Computed server-side, same as the old HTML form's redirect target -
         # the frontend must navigate to this value, never the raw ?rd= it
         # was given, or is_trusted_redirect's open-redirect guard would be

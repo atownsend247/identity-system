@@ -69,7 +69,7 @@ Then open `http://localhost:5173/`.
 
 | | |
 |---|---|
-| `POST /api/login` | JSON `{"email", "password", "otp" (optional), "rd" (optional)}`. Sets the session cookie and returns `{"user": {...}, "redirect_to": <url>}` on success — `redirect_to` is `rd` if it passed `IDENTITY_SYSTEM_COOKIE_DOMAIN` validation, `/account` otherwise. `401`/`422` JSON on failure (bad credentials, missing/bad 2FA code). |
+| `POST /api/login` | JSON `{"email", "password", "otp" (optional), "rd" (optional)}`. Sets the session cookie and returns `{"user": {...}, "redirect_to": <url>}` on success — `redirect_to` is `rd` if it passed `IDENTITY_SYSTEM_COOKIE_DOMAIN` validation, `/account` otherwise. `401`/`422` JSON on failure (bad credentials, missing/bad 2FA code). When the password is right but the account has 2FA on and no `otp` was sent, the `401` body also carries `"otp_required": true` (and no session is created) — the login page uses it to show its 2FA step, re-sending the password with the code. |
 | `POST /logout` | clears the cookie, redirects to `/login`. |
 | `GET /verify` | **the forward-auth target.** 200 with `X-Auth-User-Id` / `X-Auth-User-Email` / `X-Auth-User-Name` response headers if the request's cookie is a live session; 401 otherwise. No body either way — cheap to call on every request. |
 | `GET /me` | same identity check as `/verify`, as JSON, for an app that wants to call this service directly instead of reading proxy-injected headers. |

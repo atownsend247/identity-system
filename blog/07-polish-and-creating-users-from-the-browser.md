@@ -406,3 +406,4 @@ best compliment I can think of.
 <!-- commits: e79f8d3 6a2e506 -->
 
 Previous: [← Moving configuration into the database](06-moving-configuration-into-the-database.md)
+Next: [A two-step login wizard →](08-a-two-step-login-wizard.md)

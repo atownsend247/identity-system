@@ -12,6 +12,7 @@ proxy, and OpenID Connect for the ones that can't be. Each post is roughly a
 5. [Making Jenkins sign in](05-making-jenkins-sign-in.md)
 6. [Moving configuration into the database](06-moving-configuration-into-the-database.md)
 7. [Polish, and creating users from the browser](07-polish-and-creating-users-from-the-browser.md)
+8. [A two-step login wizard](08-a-two-step-login-wizard.md)
 
 The posts cover the history from the first commit on 28 September to 7 October.
 Each post ends with a hidden HTML comment listing the commits it covers, so the
